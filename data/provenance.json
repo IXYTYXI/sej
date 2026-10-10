@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "snapshotDate": "2026-10-10",
+  "buildScript": "scripts/build_vocab.py",
+  "stageSize": 100,
+  "normalization": "NFKC/casefold stable identity, NFC display text, plain text HTML removal, Chinese gloss requirement; unsupported private-use glyph subdefinitions omitted; first paired Japanese example retained; no media copied.",
+  "englishOrder": "Ascending minimum positive BNC/COCA rank, then normalized spelling, then stable ID. Core: first 1000 lowercase alphabetic common words (plus I), excluding explicit proper-name glosses.",
+  "japaneseOrder": "Original notes.csv column 36 rank, then spelling, then stable ID; preserve N5 → N1 labels. Deduplicate matching spelling and reading and combine meanings.",
+  "sources": [
+    {
+      "id": "ecdict",
+      "repository": "https://github.com/skywind3000/ECDICT",
+      "revision": "bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b",
+      "path": "ecdict.csv",
+      "licensePath": "LICENSE",
+      "licenseFile": "ECDICT-MIT.txt",
+      "expectedSha256": "1a6947e04785db63613a92e14903cdae7954f7e84860b10e68e5c7cbb3f9c3cf",
+      "downloadUrl": "https://raw.githubusercontent.com/skywind3000/ECDICT/bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b/ecdict.csv",
+      "sha256": "1a6947e04785db63613a92e14903cdae7954f7e84860b10e68e5c7cbb3f9c3cf",
+      "bytes": 65933428,
+      "licenseSha256": "f8552dd246f61a4e064569eae6194a01c6b3d63b03bf27c6ca863593c549ed0f"
+    },
+    {
+      "id": "eggrolls-jlpt",
+      "repository": "https://github.com/5mdld/anki-jlpt-decks",
+      "revision": "853798a4dec3630cad1984aa1c7edab31b09d109",
+      "path": "deck-source/notes.csv",
+      "licensePath": "LICENSE",
+      "licenseFile": "JLPT-CC-BY-NC-4.0.txt",
+      "expectedSha256": "30e9350c92c7bdeaf0f4c0317c9a0f659eb32e606a69870176deff159559eb1a",
+      "downloadUrl": "https://raw.githubusercontent.com/5mdld/anki-jlpt-decks/853798a4dec3630cad1984aa1c7edab31b09d109/deck-source/notes.csv",
+      "sha256": "30e9350c92c7bdeaf0f4c0317c9a0f659eb32e606a69870176deff159559eb1a",
+      "bytes": 6593640,
+      "licenseSha256": "3711f963c05d0be80d53e5923308a6dee31b203da23435c9cfb7c7b6e4dd5e19"
+    }
+  ]
+}

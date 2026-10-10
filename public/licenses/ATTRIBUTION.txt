@@ -1,0 +1,25 @@
+Wordsteps vocabulary data attribution
+
+English: ECDICT, skywind3000 and contributors
+https://github.com/skywind3000/ECDICT
+License: MIT (full original notice: ECDICT-MIT.txt).
+Changes: selected records by original examination tags and BNC/COCA frequency;
+required a Chinese gloss; removed display markup and malformed private-use glyph
+subdefinitions; merged duplicate spellings; generated stable IDs and study stages.
+Original examination tags are source classifications, not official test syllabi.
+
+Japanese: egg rolls, JLPT N1-N5 一万词 v3.5
+https://github.com/5mdld/anki-jlpt-decks
+License: Creative Commons Attribution-NonCommercial 4.0 International.
+https://creativecommons.org/licenses/by-nc/4.0/
+Full original license: JLPT-CC-BY-NC-4.0.txt.
+Changes: extracted spelling, reading, simplified Chinese meaning, and first paired
+example; removed HTML, styling and audio references; merged entries with matching
+spelling and reading; generated stable IDs and study stages. No audio is included.
+Credit remains with egg rolls. This Japanese dataset is for noncommercial use;
+it must not be integrated into a paid product, commercial advertising or marketing
+without separate permission from the rights holder. JLPT levels follow the source
+author's classification and are not an official JLPT vocabulary syllabus.
+
+Exact source commits, download URLs, dates, hashes, and normalization details are
+recorded in data/provenance.json. Actual catalog counts are in data/stats.json.

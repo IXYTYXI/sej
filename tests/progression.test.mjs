@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {hasMastery,canChallenge,canOpen,dayKey,recordReview} from '../lib/progression.ts';
+const now=Date.parse('2026-10-10T09:00:00Z');
+const card={firstSeen:now-8*86400000,goodDays:['2026-10-02','2026-10-05','2026-10-10'],lastRating:3,fsrs:{scheduled_days:10},due:now+10*86400000};
+test('80 percent is inclusive and empty stages never qualify',()=>{assert.equal(canChallenge(79,100),false);assert.equal(canChallenge(80,100),true);assert.equal(canChallenge(0,0),false);assert.equal(canChallenge(4,5),true)});
+test('mastery requires distinct spaced days, a week, good recall and a long interval',()=>{assert.equal(hasMastery(card,now),true);assert.equal(hasMastery({...card,goodDays:['2026-10-10','2026-10-10','2026-10-10']},now),false);assert.equal(hasMastery({...card,firstSeen:now-86400000},now),false);assert.equal(hasMastery({...card,lastRating:1},now),false);assert.equal(hasMastery({...card,fsrs:{scheduled_days:1}},now),false)});
+test('stage access remains locked without a grant and grants are permanent',()=>{assert.equal(canOpen({id:'ja-1',prerequisiteId:null},new Set()),true);assert.equal(canOpen({id:'en-2',prerequisiteId:'en-1'},new Set()),false);assert.equal(canOpen({id:'en-2',prerequisiteId:'en-1'},new Set(['en-2'])),true)});
+test('day boundary uses Shanghai time',()=>assert.equal(dayKey(Date.parse('2026-10-09T17:00:00Z')),'2026-10-10'));
+test('new card cannot be mastered just by pressing easy and failure resets successful days',()=>{const p=recordReview(null,{id:'en-one',language:'en'},4,now,'a');assert.equal(p.mastered,false);assert.equal(p.version,1);assert.ok(p.due>now);const failed=recordReview({...p,goodDays:['2026-10-01','2026-10-04'],due:now}, {id:'en-one',language:'en'},1,now,'b');assert.deepEqual(failed.goodDays,[]);assert.equal(failed.mastered,false);assert.equal(failed.version,2)});
+test('same-day repeat cannot add another successful day',()=>{const p=recordReview(null,{id:'ja-one',language:'ja'},3,now,'a');const q=recordReview({...p,due:now}, {id:'ja-one',language:'ja'},3,now+1000,'b');assert.equal(q.goodDays.length,1)});

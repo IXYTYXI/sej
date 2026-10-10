@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "uniqueWords": 25076,
+  "englishUniqueWords": 14444,
+  "japaneseUniqueWords": 10632,
+  "courses": 11,
+  "stages": 411,
+  "wordPlacements": 40405,
+  "wordsWithExamples": 10632,
+  "catalogBytes": 6498409,
+  "catalogSha256": "6db1ec3ddf9209995af18997183bd41a8e9d4021eab4e58af2417da60ebda38e",
+  "byCourse": [
+    {
+      "id": "en-core",
+      "title": "日常英语 · 核心 1000",
+      "words": 1000,
+      "stages": 10
+    },
+    {
+      "id": "en-cet4",
+      "title": "大学英语四级",
+      "words": 3846,
+      "stages": 39
+    },
+    {
+      "id": "en-cet6",
+      "title": "大学英语六级",
+      "words": 5406,
+      "stages": 55
+    },
+    {
+      "id": "en-ielts",
+      "title": "IELTS 雅思",
+      "words": 5040,
+      "stages": 51
+    },
+    {
+      "id": "en-toefl",
+      "title": "TOEFL 托福",
+      "words": 6974,
+      "stages": 70
+    },
+    {
+      "id": "en-gre",
+      "title": "GRE 进阶",
+      "words": 7504,
+      "stages": 76
+    },
+    {
+      "id": "ja-n5",
+      "title": "N5 · 日语入门",
+      "words": 805,
+      "stages": 9
+    },
+    {
+      "id": "ja-n4",
+      "title": "N4 · 基础表达",
+      "words": 757,
+      "stages": 8
+    },
+    {
+      "id": "ja-n3",
+      "title": "N3 · 日常交流",
+      "words": 1815,
+      "stages": 19
+    },
+    {
+      "id": "ja-n2",
+      "title": "N2 · 进阶应用",
+      "words": 3214,
+      "stages": 33
+    },
+    {
+      "id": "ja-n1",
+      "title": "N1 · 高阶精通",
+      "words": 4044,
+      "stages": 41
+    }
+  ],
+  "sourceProcessing": {
+    "ecdict": {
+      "sourceRows": 770611,
+      "retainedUniqueWords": 14444
+    },
+    "eggrolls-jlpt": {
+      "sourceRows": 10641,
+      "retainedUniqueWords": 10632,
+      "mergedDuplicateRows": 9,
+      "skippedRows": 0
+    }
+  },
+  "countingNote": "Unique words are deduplicated globally by English spelling or Japanese spelling + reading; course counts overlap and should not be summed as unique vocabulary."
+}
