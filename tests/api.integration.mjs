@@ -1,35 +1,70 @@
-// Isolated local-preview acceptance checks. Never point this script at production.
+// Starts an isolated local server and temporary database. Never targets production.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {execFileSync} from 'node:child_process';
+import {spawn} from 'node:child_process';
+import {DatabaseSync} from 'node:sqlite';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {createServer} from 'node:net';
+import {setTimeout as delay} from 'node:timers/promises';
+import {hashPassword} from '../lib/auth-password.ts';
 import {recordReview} from '../lib/progression.ts';
 
-const origin='http://127.0.0.1:5173';
-const user='local_seedy';
+const port = await new Promise(resolve=>{const server=createServer();server.listen(0,'127.0.0.1',()=>{const port=server.address().port;server.close(()=>resolve(port))})});
+const origin=`http://127.0.0.1:${port}`;
+const basePath='/study';
+const user='owner';
+const fixture=fs.mkdtempSync(join(tmpdir(),'wordsteps-api-test-'));
+const databasePath=join(fixture,'learning.sqlite');
+const password=crypto.randomUUID()+crypto.randomUUID();
+const passwordHash=await hashPassword(password);
+let cookie='';let server;let sqlConnection;let serverLog='';
+const cleanEnvironment={...process.env,APP_ORIGIN:origin,NEXT_PUBLIC_BASE_PATH:basePath,DATABASE_PATH:databasePath,AUTH_USERNAME:'integration',AUTH_PASSWORD_HASH:passwordHash,NODE_ENV:'production',PORT:String(port),HOSTNAME:'127.0.0.1'};
+for(const name of ['AUTH_PASSWORD_HASH_FILE','ANTHROPIC_API_KEY','ANTHROPIC_API_KEY_FILE','OPENAI_API_KEY','OPENAI_API_KEY_FILE'])delete cleanEnvironment[name];
+async function start(){
+ server=spawn(process.execPath,['node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port',String(port)],{cwd:process.cwd(),env:cleanEnvironment,stdio:['ignore','pipe','pipe']});
+ server.stdout.on('data',d=>serverLog+=d);server.stderr.on('data',d=>serverLog+=d);
+ for(let i=0;i<100;i++){
+  if(server.exitCode!==null)throw new Error(`Test server exited: ${serverLog}`);
+  try{const r=await fetch(origin+basePath+'/api/health');if(r.ok)return;}catch{}
+  await delay(200);
+ }
+ throw new Error(`Test server did not start: ${serverLog}`);
+}
+async function stop(){if(server&&server.exitCode===null){server.kill('SIGTERM');await new Promise(resolve=>server.once('exit',resolve));}}
+
 const catalog=JSON.parse(fs.readFileSync('data/catalog.json','utf8'));
 const stage=catalog.stages.find(s=>s.language==='en'&&!s.prerequisiteId);
 const next=catalog.stages.find(s=>s.prerequisiteId===stage.id);
 const words=new Map(catalog.words.map(w=>[w.id,w]));
-let owned=false;
+
 const quote=s=>"'"+String(s).replaceAll("'","''")+"'";
-function sql(commands){
- fs.mkdirSync('.sites-runtime',{recursive:true});
- const path='.sites-runtime/api-test-fixture.sql';
- fs.writeFileSync(path,commands);
- execFileSync(process.execPath,['--import','./scripts/sites-env.mjs','./node_modules/wrangler/bin/wrangler.js','d1','execute','DB','--local','--config','dist/server/wrangler.json','--persist-to','.wrangler/state','--file',path],{stdio:'pipe'});
-}
+function sql(commands){sqlConnection.exec(commands);}
 async function api(path,body,extra={}){
- const res=await fetch(origin+path,{headers:{Cookie:'__sites_local_auth=1',Origin:origin,...(body?{'Content-Type':'application/json'}:{}),...extra},...(body?{method:'POST',body:JSON.stringify(body)}:{})});
+ const res=await fetch(origin+basePath+path,{headers:{Cookie:cookie,Origin:origin,...(body?{'Content-Type':'application/json'}:{}),...extra},...(body?{method:'POST',body:JSON.stringify(body)}:{})});
  const text=await res.text(); let json;try{json=JSON.parse(text)}catch{if(res.status===403&&extra.Origin&&extra.Origin!==origin)json={error:text};else throw new Error(`${path}: expected JSON (${res.status}) ${text.slice(0,200)}`)};
- return {status:res.status,body:json};
+ return {status:res.status,body:json,headers:res.headers};
 }
 function ok(r){assert.equal(r.status,200,JSON.stringify(r.body));return r.body;}
 try{
- const anon=await fetch(origin+'/api/state?language=en');assert.equal(anon.status,401);
+ await start();
+ const landing=await fetch(origin+basePath,{redirect:'manual'});assert.equal(landing.status,307);assert.equal(landing.headers.get('location'),basePath+'/login');
+ sqlConnection=new DatabaseSync(databasePath);sqlConnection.exec('PRAGMA busy_timeout=5000');
+ const anon=await fetch(origin+basePath+'/api/state?language=en');assert.equal(anon.status,401);
+ const forged=await fetch(origin+basePath+'/api/state?language=en',{headers:{'oai-authenticated-user-id':'owner','oai-authenticated-user-email':'fake@example.invalid'}});assert.equal(forged.status,401);
+ assert.equal((await api('/api/auth/login',{username:'integration',password:'wrong'})).status,401);
+ const login=await api('/api/auth/login',{username:'integration',password});ok(login);
+ const setCookie=login.headers.get('set-cookie');assert.ok(setCookie.includes('HttpOnly'));assert.ok(setCookie.includes('Secure'));assert.ok(setCookie.includes('Path=/study'));cookie=setCookie.split(';')[0];
+ const page=await fetch(origin+basePath,{headers:{Cookie:cookie}});assert.equal(page.status,200);
+ const loginRedirect=await fetch(origin+basePath+'/login',{headers:{Cookie:cookie},redirect:'manual'});assert.equal(loginRedirect.status,307);assert.equal(loginRedirect.headers.get('location'),basePath+'/');
+ assert.equal((await api('/api/ai/status')).status,200);
+ assert.ok(ok(await api('/api/ai/status')).providers.every(p=>p.enabled===false));
+ assert.equal((await api('/api/ai',{action:'report',language:'en',requestId:crypto.randomUUID()})).status,503);
+
  const initial=ok(await api('/api/state?language=en'));
  assert.equal(initial.stats.mastered,0);assert.equal(initial.stats.learning,0,'Local QA database must start empty');
  const ja=ok(await api('/api/state?language=ja'));assert.equal(ja.stats.learning,0);
- owned=true;
+
  assert.equal(initial.stages.filter(s=>s.unlocked).length,1);
  assert.equal((await api('/api/study?language=en&stageId='+next.id)).status,403);
  assert.equal((await api('/api/exam',{stageId:stage.id})).status,403);
@@ -83,7 +118,12 @@ try{
  const forgotten=ok(await api('/api/state?language=en'));assert.equal(forgotten.stages.find(s=>s.id===stage.id).mastered,79);assert.equal(forgotten.stages.find(s=>s.id===next.id).unlocked,true);
  assert.equal((await api('/api/study?language=en&stageId='+next.id)).status,200);
  console.log('PASS forgetting reduces current mastery but keeps earned unlock');
- console.log('ALL LOCAL API ACCEPTANCE CHECKS PASSED');
+ await stop();await start();
+ const restored=ok(await api('/api/state?language=en'));assert.equal(restored.stages.find(s=>s.id===next.id).unlocked,true);assert.equal(restored.stats.todayNew,10);
+ ok(await api('/api/auth/logout',{}));assert.equal((await api('/api/state?language=en')).status,401);
+ console.log('PASS process restart preserves sessions, learning records and earned unlocks; logout revokes session');
+ console.log('ALL DOCKER-RUNTIME API ACCEPTANCE CHECKS PASSED');
 }finally{
- if(owned){sql(['review_events','cards','exams','unlocks','passes','learners'].map(t=>`DELETE FROM ${t} WHERE user_id=${quote(user)};`).join('\n'));console.log('Removed only this run’s local simulated-user fixtures.');}
+ await stop();sqlConnection?.close();fs.rmSync(fixture,{recursive:true,force:true});
+ console.log('Removed only this run’s isolated temporary database.');
 }

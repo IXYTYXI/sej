@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Check, CircleCheck, RotateCcw, Sparkles, Volume2 } from "lucide-react";
 import { api, ApiError, type Language, type StudyResponse, languageName } from "./types";
 import { ErrorNotice, Loading, Modal, ProgressBar } from "./ui";
+import { AIHint } from "./ai-learning";
 
 const ratings = [{ value: 1, label: "忘了", hint: "没能想起来" }, { value: 2, label: "有点难", hint: "费力才想起" }, { value: 3, label: "记得", hint: "正常想起来" }, { value: 4, label: "很熟", hint: "轻松又确定" }];
 const tagLabels: Record<string, string> = {
@@ -21,6 +22,7 @@ export function StudySession({ language, stageId, title, onClose, onChange }: { 
   const [revealed, setRevealed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [hintBusy, setHintBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState("");
   const [audioNote, setAudioNote] = useState("");
@@ -38,7 +40,7 @@ export function StudySession({ language, stageId, title, onClose, onChange }: { 
   }, [language, stageId]);
   useEffect(() => { mounted.current = true; void load(); if ("speechSynthesis" in window) window.speechSynthesis.getVoices(); return () => { mounted.current = false; if ("speechSynthesis" in window) window.speechSynthesis.cancel(); }; }, [load]);
   async function rate(rating: number) {
-    if (!card || !revealed || submitting.current) return;
+    if (!card || !revealed || submitting.current || hintBusy) return;
     submitting.current = true; setSaving(true); setError(null);
     const previous = submission.current;
     const body = previous?.wordId === card.id && previous.rating === rating && previous.version === card.version
@@ -67,7 +69,7 @@ export function StudySession({ language, stageId, title, onClose, onChange }: { 
     utterance.onerror = () => { if (mounted.current) setAudioNote("发音暂时不可用，请检查设备语音设置后再试。"); };
     synth.speak(utterance);
   }
-  return <Modal title={title || `${languageName(language)} · 今日学习`} onClose={onClose} busy={saving}>
+  return <Modal title={title || `${languageName(language)} · 今日学习`} onClose={onClose} busy={saving || hintBusy}>
     {loading ? <Loading text="正在安排本次学习" /> : error && !data ? <div className="modal-inner"><ErrorNotice error={error} retry={() => void load()} /></div> : card ? <div className="study-content">
       <div className="session-topline"><span>{title || `${languageName(language)} · 今日练习`}</span><span>{index + 1} / {data!.cards.length}</span></div><ProgressBar value={index / data!.cards.length * 100} label="本组学习进度" />
       <div className="word-card"><div className="word-card-tags"><span className={`pill ${card.isNew ? "coral-pill" : "green-pill"}`}>{card.isNew ? <Sparkles size={12} /> : <RotateCcw size={12} />}{card.isNew ? "新朋友" : "再见一面"}</span>{displayTags.map(tag => <span key={tag} className="word-tag">{tag}</span>)}</div>
@@ -77,7 +79,7 @@ export function StudySession({ language, stageId, title, onClose, onChange }: { 
         {revealed ? <div className="word-answer" aria-live="polite"><div className="answer-divider"><span>释义</span></div><p className="word-meaning">{card.meaning}</p>{card.example && <blockquote><p lang={language}>{card.example}</p>{card.exampleMeaning && <span>{card.exampleMeaning}</span>}</blockquote>}<span className="word-source">来源：{sourceLabels[card.source] || "详见「规则与设置」"}</span></div> : <div className="recall-prompt"><span className="recall-dot" /><p>先在心里回忆一下，<br />这个词是什么意思？</p></div>}
       </div>
       <ErrorNotice error={error} />
-      {revealed ? <div className="rating-section"><p>{saving ? "正在保存这次回忆…" : "这次，你想起来了吗？"}</p><div className="rating-buttons">{ratings.map(rating => <button className={`rating-button rating-${rating.value}`} key={rating.value} disabled={saving} onClick={() => void rate(rating.value)}><strong>{rating.label}</strong><span>{rating.hint}</span></button>)}</div><span className="rating-note">按真实感受选择，复习安排才会更适合你。</span></div> : <button className="button primary reveal-button" onClick={() => setRevealed(true)}>查看释义 <ArrowRight size={18} /></button>}
+      {revealed ? <><div className="rating-section"><p>{saving ? "正在保存这次回忆…" : hintBusy ? "正在生成记忆提示，请稍候…" : "这次，你想起来了吗？"}</p><div className="rating-buttons">{ratings.map(rating => <button className={`rating-button rating-${rating.value}`} key={rating.value} disabled={saving || hintBusy} onClick={() => void rate(rating.value)}><strong>{rating.label}</strong><span>{rating.hint}</span></button>)}</div><span className="rating-note">按查看提示前的回忆情况选择，复习安排才会更适合你。</span></div><AIHint key={card.id} card={card} onBusyChange={setHintBusy} disabled={saving} /></> : <button className="button primary reveal-button" onClick={() => setRevealed(true)}>查看释义 <ArrowRight size={18} /></button>}
       {notice && <div className="session-notice" role="status"><Check size={13} />{notice}</div>}
     </div> : <div className="session-finish"><span className="finish-symbol"><CircleCheck size={42} strokeWidth={1.4} /></span><span className="eyebrow">ONE STEP FURTHER</span><h2>{completed > 0 ? "又向前走了一小步。" : "这一刻，可以歇一歇。"}</h2><p>{completed > 0 ? `本次已完成 ${completed} 次练习，进度已经保存。` : "目前没有可学习的卡片。到期复习或新的每日额度开放后，再来继续。"}</p>{data && <p className="subtle">今日剩余新词额度 {data.newRemaining} 个 · 系统会优先安排到期复习</p>}<div className="finish-actions"><button className="button primary" onClick={onClose}>回到学习空间 <ArrowRight size={16} /></button><button className="button ghost" onClick={() => { setNotice(""); void load(); }}><RotateCcw size={15} />检查下一组</button></div><ErrorNotice error={error} /></div>}
   </Modal>;

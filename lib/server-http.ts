@@ -12,7 +12,15 @@ export function identifier(value: unknown): string {
 }
 export async function readBody(request: Request): Promise<unknown> {
   const origin = request.headers.get('origin');
-  if (!origin || origin !== new URL(request.url).origin || request.headers.get('sec-fetch-site') === 'cross-site') throw new ApiError(403, '请从本站提交操作');
+  const configuredOrigin = process.env.APP_ORIGIN;
+  if (!configuredOrigin && process.env.NODE_ENV === 'production') throw new ApiError(503, '服务地址尚未配置');
+  let expectedOrigin: string;
+  try {
+    const configured = new URL(configuredOrigin || request.url);
+    if (!['http:', 'https:'].includes(configured.protocol) || configured.username || configured.password) throw new Error('Invalid origin');
+    expectedOrigin = configured.origin;
+  } catch { throw new ApiError(503, '服务地址配置不正确'); }
+  if (!origin || origin !== expectedOrigin || request.headers.get('sec-fetch-site') === 'cross-site') throw new ApiError(403, '请从本站提交操作');
   if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') throw new ApiError(415, '请使用 JSON 请求');
   if (Number(request.headers.get('content-length')) > 32768) throw new ApiError(413, '请求内容过大');
   const reader = request.body?.getReader();

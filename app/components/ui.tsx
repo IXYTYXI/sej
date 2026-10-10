@@ -3,13 +3,14 @@
 import { useEffect, useRef } from "react";
 import { AlertCircle, ArrowUpRight, LoaderCircle, X } from "lucide-react";
 import { ApiError } from "./types";
+import { appPath } from "../../lib/paths";
 
 export function ErrorNotice({ error, retry }: { error: unknown; retry?: () => void }) {
   if (!error) return null;
   const unauthorized = error instanceof ApiError && error.status === 401;
   return <div className="error-notice" role="alert"><AlertCircle size={19} /><div>
     <p>{unauthorized ? "登录已过期，请重新登录后继续学习。" : error instanceof Error ? error.message : String(error)}</p>
-    {unauthorized ? <a href="/signin-with-chatgpt?return_to=/" target="_top">使用 ChatGPT 重新登录 <ArrowUpRight size={14} /></a>
+    {unauthorized ? <a href={appPath("/login")} target="_top">重新登录 <ArrowUpRight size={14} /></a>
       : retry && <button type="button" onClick={retry}>再试一次</button>}
   </div></div>;
 }
@@ -33,7 +34,7 @@ export function Modal({ children, title, onClose, busy = false }: {
     function keydown(event: KeyboardEvent) {
       if (event.key === "Escape" && !busyRef.current) close.current();
       if (event.key !== "Tab") return;
-      const buttons = dialog.current?.querySelectorAll<HTMLElement>("button:not([disabled]), a[href], input, select, [tabindex='0']");
+      const buttons = dialog.current?.querySelectorAll<HTMLElement>("button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex='0']");
       if (!buttons?.length) return;
       const first = buttons[0], last = buttons[buttons.length - 1];
       if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.current)) { event.preventDefault(); last.focus(); }

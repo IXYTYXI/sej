@@ -2,6 +2,7 @@ import type { Catalog, Language, Progress, Stage } from './types';
 import { canChallenge, canOpen, dayKey, dayStart, hasMastery, recordReview } from './progression';
 import { createExam, gradeExam, type ExamData } from './exams';
 import { ApiError, identifier, object } from './server-http';
+import type { Database } from './database';
 
 type User = {userId:string;displayName:string};
 type CardRow = {data:string};
@@ -14,7 +15,7 @@ const masterySQL = `json_extract(c.data, '$.lastRating') >= 3
  AND (SELECT COUNT(DISTINCT value) FROM json_each(c.data, '$.goodDays')) >= 3`;
 const countMasterySQL = `(SELECT COUNT(*) FROM cards c JOIN json_each(?) w ON c.word_id = w.value WHERE c.user_id = ? AND ${masterySQL})`;
 
-export function createLearningService(db: D1Database, catalog: Catalog, user: User, clock: ()=>number = Date.now) {
+export function createLearningService(db: Database, catalog: Catalog, user: User, clock: ()=>number = Date.now) {
   const words = new Map(catalog.words.map(word=>[word.id,word]));
   const stageMap = new Map(catalog.stages.map(stage=>[stage.id,stage]));
   const prepare = (sql:string,...values:(string|number|null)[]) => db.prepare(sql).bind(...values);

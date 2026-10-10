@@ -1,0 +1,44 @@
+name: wordsteps
+services:
+  app:
+    image: wordsteps:${WORDSTEPS_VERSION:-local}
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_BASE_PATH: /study
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_BASE_PATH: /study
+      DATABASE_PATH: /data/wordsteps.sqlite
+      AUTH_PASSWORD_HASH_FILE: /run/secrets/auth_password_hash
+      ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
+      OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
+    ports:
+      - "127.0.0.1:${WORDSTEPS_PORT:-3100}:3000"
+    volumes:
+      - learning_data:/data
+      - ./secrets:/run/secrets:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/study/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+volumes:
+  learning_data:
+    name: wordsteps_learning_data
