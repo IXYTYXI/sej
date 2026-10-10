@@ -22,6 +22,8 @@
 
 `.env` 中可以更换 `ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL`、`OPENAI_BASE_URL`、`OPENAI_MODEL`。base URL 支持带或不带 `/v1`，不能带用户信息、查询参数或跳转；服务不会跟随 API 重定向。两个提供者不共享 key，不会静默回退。
 
+部署样例的 OpenAI 模型为 `gpt-6-luna`，已于 2026-10-10 使用独立密钥通过指定网关的真实 Chat Completions 请求验证。样例只保存模型标识；上线时仍须注入运行时密钥。
+
 ## 启动与接入
 
 ```sh
