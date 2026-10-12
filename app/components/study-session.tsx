@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Check, CircleCheck, RotateCcw, Sparkles, Volume2 } from "lucide-react";
-import { api, ApiError, type Language, type StudyResponse, languageName } from "./types";
+import { api, ApiError, type DailyQuota, type Language, type StudyResponse, languageName } from "./types";
 import { ErrorNotice, Loading, Modal, ProgressBar } from "./ui";
 import { AIHint } from "./ai-learning";
 
@@ -16,7 +16,7 @@ const tagLabels: Record<string, string> = {
 };
 const sourceLabels: Record<string, string> = { ecdict: "ECDICT 英汉词典", "eggrolls-jlpt": "egg rolls 日语能力考词库" };
 
-export function StudySession({ language, stageId, title, onClose, onChange }: { language: Language; stageId?: string; title?: string; onClose: () => void; onChange: () => Promise<void> }) {
+export function StudySession({ language, stageId, title, quota, todayNew, onManageQuota, onClose, onChange }: { language: Language; stageId?: string; title?: string; quota: DailyQuota; todayNew: number; onManageQuota: () => void; onClose: () => void; onChange: () => Promise<void> }) {
   const [data, setData] = useState<StudyResponse | null>(null);
   const [index, setIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
@@ -24,6 +24,8 @@ export function StudySession({ language, stageId, title, onClose, onChange }: { 
   const [saving, setSaving] = useState(false);
   const [hintBusy, setHintBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [refreshError, setRefreshError] = useState<unknown>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [notice, setNotice] = useState("");
   const [audioNote, setAudioNote] = useState("");
   const [completed, setCompleted] = useState(0);
@@ -31,16 +33,23 @@ export function StudySession({ language, stageId, title, onClose, onChange }: { 
   const submission = useRef<{ wordId: string; rating: number; version: number; requestId: string } | null>(null);
   const mounted = useRef(true);
   const card = data?.cards[index];
+  const newRemaining = quota.needsDecision ? 0 : Math.max(0, quota.limit - todayNew);
   const displayTags = Array.from(new Set((card?.tags || []).map(tag => tagLabels[tag.toLowerCase()]).filter(Boolean))).slice(0, 2);
+  const refreshState = useCallback(async () => {
+    setRefreshing(true);
+    try { await onChange(); if (mounted.current) setRefreshError(null); }
+    catch (cause) { if (mounted.current) setRefreshError(cause); }
+    finally { if (mounted.current) setRefreshing(false); }
+  }, [onChange]);
   const load = useCallback(async () => {
     setLoading(true); setError(null); setRevealed(false); setAudioNote("");
-    try { const result = await api<StudyResponse>(`/api/study?language=${language}${stageId ? `&stageId=${encodeURIComponent(stageId)}` : ""}`); if (mounted.current) { setData(result); setIndex(0); } }
+    try { const result = await api<StudyResponse>(`/api/study?language=${language}${stageId ? `&stageId=${encodeURIComponent(stageId)}` : ""}`); if (mounted.current) { setData(result); setIndex(0); await refreshState(); } }
     catch (cause) { if (mounted.current) setError(cause); }
     finally { if (mounted.current) setLoading(false); }
-  }, [language, stageId]);
+  }, [language, stageId, refreshState]);
   useEffect(() => { mounted.current = true; void load(); if ("speechSynthesis" in window) window.speechSynthesis.getVoices(); return () => { mounted.current = false; if ("speechSynthesis" in window) window.speechSynthesis.cancel(); }; }, [load]);
   async function rate(rating: number) {
-    if (!card || !revealed || submitting.current || hintBusy) return;
+    if (!card || !revealed || submitting.current || hintBusy || (card.isNew && quota.needsDecision)) return;
     submitting.current = true; setSaving(true); setError(null);
     const previous = submission.current;
     const body = previous?.wordId === card.id && previous.rating === rating && previous.version === card.version
@@ -52,9 +61,9 @@ export function StudySession({ language, stageId, title, onClose, onChange }: { 
       const due = new Date(result.nextDue);
       setNotice(Number.isNaN(due.getTime()) ? "已保存这次回忆" : `已记录，下次复习：${due.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Shanghai" })}`);
       submission.current = null; setCompleted(value => value + 1); setIndex(value => value + 1); setRevealed(false); setAudioNote("");
-      void onChange();
+      await refreshState();
     } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 409) { setNotice("其他设备已更新这张卡，已重新载入最新进度。"); submission.current = null; await load(); }
+      if (cause instanceof ApiError && cause.status === 409) { setNotice(`${cause.message} 已重新读取学习进度与今日额度。`); submission.current = null; await load(); }
       else setError(cause);
     } finally { submitting.current = false; if (mounted.current) setSaving(false); }
   }
@@ -70,7 +79,8 @@ export function StudySession({ language, stageId, title, onClose, onChange }: { 
     synth.speak(utterance);
   }
   return <Modal title={title || `${languageName(language)} · 今日学习`} onClose={onClose} busy={saving || hintBusy}>
-    {loading ? <Loading text="正在安排本次学习" /> : error && !data ? <div className="modal-inner"><ErrorNotice error={error} retry={() => void load()} /></div> : card ? <div className="study-content">
+    {loading ? <Loading text="正在安排本次学习" /> : error && !data ? <div className="modal-inner"><ErrorNotice error={error} retry={() => void load()} /></div> : card?.isNew && quota.needsDecision ? <div className="quota-study-decision"><h2>新的一天，先选择新词额度。</h2><p>可以保留 {quota.limit} 个，也可以重置到基础 {quota.baseLimit} 个。已有学习记录不会清空，到期复习仍可继续。</p><div className="finish-actions"><button className="button primary" onClick={onManageQuota}>选择今日额度<ArrowRight size={16} /></button><button className="button ghost" onClick={() => void load()}><RotateCcw size={15} />只安排到期复习</button></div>{notice && <p className="session-notice" role="status">{notice}</p>}</div> : card ? <div className="study-content">
+      {quota.needsDecision && <div className="quota-study-notice"><p>今天的新词额度尚待选择。你可以继续复习；保留或重置额度都不会清空学习记录。</p><button className="text-button" disabled={saving || hintBusy} onClick={onManageQuota}>返回选择今日额度<ArrowRight size={14} /></button></div>}
       <div className="session-topline"><span>{title || `${languageName(language)} · 今日练习`}</span><span>{index + 1} / {data!.cards.length}</span></div><ProgressBar value={index / data!.cards.length * 100} label="本组学习进度" />
       <div className="word-card"><div className="word-card-tags"><span className={`pill ${card.isNew ? "coral-pill" : "green-pill"}`}>{card.isNew ? <Sparkles size={12} /> : <RotateCcw size={12} />}{card.isNew ? "新朋友" : "再见一面"}</span>{displayTags.map(tag => <span key={tag} className="word-tag">{tag}</span>)}</div>
         <div className="word-prompt"><h2 lang={language} className={card.word.length > 16 ? "long-word" : ""}>{card.word}</h2><button className="pronounce-button" onClick={speak} aria-label={`播放${card.word}的发音`} title="播放发音"><Volume2 size={22} /></button></div>
@@ -81,6 +91,6 @@ export function StudySession({ language, stageId, title, onClose, onChange }: { 
       <ErrorNotice error={error} />
       {revealed ? <><div className="rating-section"><p>{saving ? "正在保存这次回忆…" : hintBusy ? "正在生成记忆提示，请稍候…" : "这次，你想起来了吗？"}</p><div className="rating-buttons">{ratings.map(rating => <button className={`rating-button rating-${rating.value}`} key={rating.value} disabled={saving || hintBusy} onClick={() => void rate(rating.value)}><strong>{rating.label}</strong><span>{rating.hint}</span></button>)}</div><span className="rating-note">按查看提示前的回忆情况选择，复习安排才会更适合你。</span></div><AIHint key={card.id} card={card} onBusyChange={setHintBusy} disabled={saving} /></> : <button className="button primary reveal-button" onClick={() => setRevealed(true)}>查看释义 <ArrowRight size={18} /></button>}
       {notice && <div className="session-notice" role="status"><Check size={13} />{notice}</div>}
-    </div> : <div className="session-finish"><span className="finish-symbol"><CircleCheck size={42} strokeWidth={1.4} /></span><span className="eyebrow">ONE STEP FURTHER</span><h2>{completed > 0 ? "又向前走了一小步。" : "这一刻，可以歇一歇。"}</h2><p>{completed > 0 ? `本次已完成 ${completed} 次练习，进度已经保存。` : "目前没有可学习的卡片。到期复习或新的每日额度开放后，再来继续。"}</p>{data && <p className="subtle">今日剩余新词额度 {data.newRemaining} 个 · 系统会优先安排到期复习</p>}<div className="finish-actions"><button className="button primary" onClick={onClose}>回到学习空间 <ArrowRight size={16} /></button><button className="button ghost" onClick={() => { setNotice(""); void load(); }}><RotateCcw size={15} />检查下一组</button></div><ErrorNotice error={error} /></div>}
+    </div> : <div className="session-finish"><span className="finish-symbol"><CircleCheck size={42} strokeWidth={1.4} /></span><span className="eyebrow">ONE STEP FURTHER</span><h2>{completed > 0 ? "又向前走了一小步。" : "这一刻，可以歇一歇。"}</h2><p>{completed > 0 ? `本次已完成 ${completed} 次练习，进度已经保存。` : "目前没有可学习的卡片。到期复习或新的每日额度开放后，再来继续。"}</p>{data && <p className="subtle">{refreshing ? "正在同步最新的今日额度…" : refreshError ? "今日额度暂未同步，请刷新后查看。" : quota.needsDecision ? "今日新词额度待确认，到期复习仍可继续。" : `今日剩余新词额度 ${newRemaining} 个 · 系统会优先安排到期复习`}</p>}{!quota.needsDecision && !refreshError && !refreshing && newRemaining > 0 && <p className="quota-next-note">每组最多安排 50 个词；仍有新词额度时，可继续检查下一组。未解锁的阶段仍需先通过测验。</p>}<div className="finish-actions"><button className="button primary" onClick={onClose}>回到学习空间 <ArrowRight size={16} /></button><button className="button ghost" disabled={saving || refreshing} onClick={() => { setNotice(""); void load(); }}><RotateCcw size={15} />{quota.needsDecision ? "检查到期复习" : "继续下一组"}</button><button className="button outline" disabled={saving} onClick={onManageQuota}>{quota.needsDecision ? "选择今日额度" : "调整今日新词额度"}<ArrowRight size={15} /></button></div><ErrorNotice error={error} /><ErrorNotice error={refreshError} retry={refreshing ? undefined : () => void refreshState()} /></div>}
   </Modal>;
 }

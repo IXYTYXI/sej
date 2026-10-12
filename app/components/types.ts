@@ -8,8 +8,16 @@ export type Stage = {
   prerequisiteId: string | null; total: number; mastered: number; learned: number;
   percent: number; unlocked: boolean; passed: boolean; canTest: boolean;
 };
+export type DailyQuota = {
+  day: string; baseLimit: number; limit: number; boostsUsed: number; boostsRemaining: number;
+  needsDecision: boolean; previousDay: string | null; previousLimit: number | null;
+  version: number; boosts: number[];
+};
+export type QuotaRequest = { language: Language; action: "boost" | "keep" | "reset";
+  amount?: number; day: string; version: number; requestId: string };
 export type AppState = {
   user: { name: string }; language: Language; settings: { dailyNewLimit: number };
+  quota: DailyQuota;
   stats: { mastered: number; learning: number; due: number; totalWords: number; todayReviews: number;
     todayNew: number; unlockedStages: number; totalStages: number };
   courses: Course[]; stages: Stage[];
