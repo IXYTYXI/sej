@@ -25,7 +25,7 @@ export default function LoginForm() {
     } catch (error) { setError(error instanceof Error ? error.message : '暂时无法连接，请稍后重试'); setBusy(false); }
   }
   return <form onSubmit={submit} style={{ display: 'grid', gap: 20 }}>
-    <label style={{ fontSize: 14, color: '#59634e' }}>账号<input name="username" autoComplete="username" required minLength={2} maxLength={32} pattern="[A-Za-z0-9_-]+" style={inputStyle} disabled={busy} /></label>
+    <label style={{ fontSize: 14, color: '#59634e' }}>账号<input name="username" autoComplete="username" required minLength={registering ? 2 : 1} maxLength={registering ? 32 : 128} pattern={registering ? '[A-Za-z0-9_\\-]+' : undefined} style={inputStyle} disabled={busy} /></label>
     <label style={{ fontSize: 14, color: '#59634e' }}>密码<input name="password" type="password" autoComplete={registering ? 'new-password' : 'current-password'} required minLength={registering ? 12 : 1} maxLength={1024} style={inputStyle} disabled={busy} /></label>
     {registering && <label style={{ fontSize: 14, color: '#59634e' }}>邀请码<input name="inviteCode" autoComplete="off" required maxLength={128} style={inputStyle} disabled={busy} /></label>}
     {error && <p role="alert" style={{ color: '#b34032', fontSize: 14, lineHeight: 1.6 }}>{error}</p>}

@@ -15,11 +15,13 @@
 | 文件 | 内容 |
 |---|---|
 | `auth_password_hash` | 使用 `scripts/hash-password.mjs` 由 stdin 接收至少 12 字符的独立登录密码，输出 scrypt hash。这是初始账号 `AUTH_USERNAME` 的密码 |
-| `registration_code` | 至少 8 个字符的邀请码。没有邀请码不能注册；每个注册账号单独计算每天 30 次 AI 额度 |
+| `registration_code` | 可选，8–128 个字符的单行邀请码。没有有效邀请码时关闭注册；每个注册账号单独计算每天 30 次 AI 额度 |
 | `anthropic_api_key` | Claude 接口的真实密钥 |
 | `openai_api_key` | OpenAI 接口的真实密钥；未提供可为空 |
 
 不要复用 SSH root 密码。不要把密码放进命令行参数；交互读取后经 stdin 传给 hash 脚本。仅将 hash 保存到指定文件。密钥通过受保护的输入方式写入对应运行时文件，不写入源码或 `.env.example`。建议秘密文件属主 UID 1000、权限 0400；目录由 root 管理。`.gitignore` 与 `.dockerignore` 均排除该目录。
+
+升级已有部署时可以暂不添加 `registration_code`。邀请码缺失、不可读、格式无效，或同时配置 `REGISTRATION_CODE` 与 `REGISTRATION_CODE_FILE` 时，注册接口返回 503「注册尚未开放」，已有账号仍可登录，健康检查仍验证必需的账号密码配置与数据库。有效的 `auth_password_hash` 始终必需；健康检查成功不代表注册已开放。
 
 `.env` 中可以更换 `ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL`、`OPENAI_BASE_URL`、`OPENAI_MODEL`。base URL 支持带或不带 `/v1`，不能带用户信息、查询参数或跳转；服务不会跟随 API 重定向。两个提供者不共享 key，不会静默回退。
 

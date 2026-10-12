@@ -16,11 +16,14 @@ const basePath='/study';
 const user='owner';
 const fixture=fs.mkdtempSync(join(tmpdir(),'wordsteps-api-test-'));
 const databasePath=join(fixture,'learning.sqlite');
+const username='owner@example.invalid';
 const password=crypto.randomUUID()+crypto.randomUUID();
 const passwordHash=await hashPassword(password);
 let cookie='';let server;let sqlConnection;let serverLog='';
-const cleanEnvironment={...process.env,APP_ORIGIN:origin,NEXT_PUBLIC_BASE_PATH:basePath,DATABASE_PATH:databasePath,AUTH_USERNAME:'integration',AUTH_PASSWORD_HASH:passwordHash,NODE_ENV:'production',PORT:String(port),HOSTNAME:'127.0.0.1'};
-for(const name of ['AUTH_PASSWORD_HASH_FILE','ANTHROPIC_API_KEY','ANTHROPIC_API_KEY_FILE','OPENAI_API_KEY','OPENAI_API_KEY_FILE'])delete cleanEnvironment[name];
+const cleanEnvironment={...process.env,APP_ORIGIN:origin,NEXT_PUBLIC_BASE_PATH:basePath,DATABASE_PATH:databasePath,AUTH_USERNAME:username,AUTH_PASSWORD_HASH:passwordHash,NODE_ENV:'production',PORT:String(port),HOSTNAME:'127.0.0.1',NEXT_TELEMETRY_DISABLED:'1'};
+for(const name of ['AUTH_PASSWORD_HASH_FILE','REGISTRATION_CODE','REGISTRATION_CODE_FILE','ANTHROPIC_API_KEY','ANTHROPIC_API_KEY_FILE','OPENAI_API_KEY','OPENAI_API_KEY_FILE'])delete cleanEnvironment[name];
+// Existing deployments may not yet have the optional invitation file.
+cleanEnvironment.REGISTRATION_CODE_FILE=join(fixture,'missing-registration-code');
 async function start(){
  server=spawn(process.execPath,['node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port',String(port)],{cwd:process.cwd(),env:cleanEnvironment,stdio:['ignore','pipe','pipe']});
  server.stdout.on('data',d=>serverLog+=d);server.stderr.on('data',d=>serverLog+=d);
@@ -52,8 +55,9 @@ try{
  sqlConnection=new DatabaseSync(databasePath);sqlConnection.exec('PRAGMA busy_timeout=5000');
  const anon=await fetch(origin+basePath+'/api/state?language=en');assert.equal(anon.status,401);
  const forged=await fetch(origin+basePath+'/api/state?language=en',{headers:{'oai-authenticated-user-id':'owner','oai-authenticated-user-email':'fake@example.invalid'}});assert.equal(forged.status,401);
- assert.equal((await api('/api/auth/login',{username:'integration',password:'wrong'})).status,401);
- const login=await api('/api/auth/login',{username:'integration',password});ok(login);
+ assert.equal((await api('/api/auth/register',{username:'friend',password,inviteCode:'not-configured'})).status,503);
+ assert.equal((await api('/api/auth/login',{username,password:'wrong'})).status,401);
+ const login=await api('/api/auth/login',{username,password});ok(login);
  const setCookie=login.headers.get('set-cookie');assert.ok(setCookie.includes('HttpOnly'));assert.ok(setCookie.includes('Secure'));assert.ok(setCookie.includes('Path=/study'));cookie=setCookie.split(';')[0];
  const page=await fetch(origin+basePath,{headers:{Cookie:cookie}});assert.equal(page.status,200);
  const loginRedirect=await fetch(origin+basePath+'/login',{headers:{Cookie:cookie},redirect:'manual'});assert.equal(loginRedirect.status,307);assert.equal(loginRedirect.headers.get('location'),basePath+'/');
@@ -210,6 +214,41 @@ try{
  assert.equal((await api('/api/quota',{...thirdBoost,amount:1,version:persistentQuota.version,requestId:crypto.randomUUID()})).status,409,'Restarting must not replenish the daily boost allowance');
  ok(await api('/api/auth/logout',{}));assert.equal((await api('/api/state?language=en')).status,401);
  console.log('PASS process restart preserves sessions, learning records, earned unlocks, quota and receipts; logout revokes session');
+
+ // Enabling invitations must leave the existing owner's data and quota untouched.
+ await stop();
+ delete cleanEnvironment.REGISTRATION_CODE_FILE;
+ const inviteCode=crypto.randomUUID();
+ cleanEnvironment.REGISTRATION_CODE=inviteCode;
+ await start();
+ const ownerLogin=await api('/api/auth/login',{username,password});ok(ownerLogin);
+ const ownerCookie=ownerLogin.headers.get('set-cookie').split(';')[0];
+ const registration=await api('/api/auth/register',{username:'friend',password,inviteCode});
+ const registered=ok(registration);assert.notEqual(registered.user.userId,'owner');
+ cookie=registration.headers.get('set-cookie').split(';')[0];
+ const friendInitial=ok(await api('/api/state?language=en'));
+ assert.equal(friendInitial.stats.todayNew,0);assert.equal(friendInitial.stats.learning,0);
+ assert.equal(friendInitial.quota.limit,10);assert.equal(friendInitial.quota.boostsUsed,0);
+ assert.equal(friendInitial.stages.find(s=>s.id===next.id).unlocked,false);
+ const friendBoost={language:'en',action:'boost',amount:10,day:friendInitial.quota.day,version:friendInitial.quota.version,requestId:crypto.randomUUID()};
+ assert.equal(ok(await api('/api/quota',friendBoost)).quota.limit,20);
+ cookie=ownerCookie;
+ assert.deepEqual(ok(await api('/api/state?language=en')).quota,persistentQuota);
+ assert.equal(ok(await api('/api/state?language=en')).stats.todayNew,11);
+
+ // A successful login by another account cannot clear the owner's failure count.
+ for(let i=0;i<10;i++){
+  assert.equal((await api('/api/auth/login',{username:i%2?username.toUpperCase():username,password:'wrong'})).status,401);
+  ok(await api('/api/auth/login',{username:'friend',password}));
+ }
+ const blocked=await api('/api/auth/login',{username,password:'wrong'});
+ assert.equal(blocked.status,429);assert.equal(blocked.headers.get('retry-after'),'900');
+ const friendLogin=await api('/api/auth/login',{username:'FRIEND',password});ok(friendLogin);
+ cookie=friendLogin.headers.get('set-cookie').split(';')[0];
+ assert.equal(ok(await api('/api/state?language=en')).quota.limit,20);
+ cookie=ownerCookie;
+ assert.deepEqual(ok(await api('/api/state?language=en')).quota,persistentQuota,'Rate limiting must not revoke existing owner sessions or data');
+ console.log('PASS optional invitation upgrade, legacy owner login, registration and account-isolated learning, quotas and login limits');
  console.log('ALL NATIVE-RUNTIME API ACCEPTANCE CHECKS PASSED');
 }finally{
  await stop();sqlConnection?.close();fs.rmSync(fixture,{recursive:true,force:true});

@@ -111,7 +111,7 @@ test('login is limited before password work and password rotation invalidates pr
     const session = await auth.login({ username: 'yc', password: 'test-password-not-for-production' });
     const rotated = createAuthService(db, { ...config, passwordHash: await hashPassword('another-password-for-tests') });
     assert.equal(await rotated.userForHeaders(new Headers({ cookie: `${SESSION_COOKIE}=${session.token}` })), null);
-    for (let i = 0; i < 10; i++) await assert.rejects(auth.login({ username: 'wrong', password: 'wrong' }), { status: 401 });
+    for (let i = 0; i < 10; i++) await assert.rejects(auth.login({ username: 'yc', password: 'wrong' }), { status: 401 });
     await assert.rejects(auth.login({ username: 'yc', password: 'test-password-not-for-production' }), { status: 429 });
   } finally { db.close(); }
 });

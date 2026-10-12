@@ -45,14 +45,14 @@ export function createAuthService(db: Database, config: AuthConfig, clock = Date
     return db.prepare('SELECT id,username,password_hash FROM users WHERE username=? COLLATE NOCASE').bind(username).first<{ id: string; username: string; password_hash: string }>();
   }
 
-  async function openSession(userId: string, passwordHash: string, now: number) {
+  async function openSession(userId: string, passwordHash: string, now: number, loginLimitKey?: string) {
     const token = randomBytes(32).toString('base64url');
     const expiresAt = now + SESSION_DURATION;
     const version = digest(passwordHash);
     await db.batch([
       db.prepare('DELETE FROM auth_sessions WHERE expires_at<=? OR (user_id=? AND auth_version<>?)').bind(now, userId, version),
       db.prepare('INSERT INTO auth_sessions(token_hash,auth_version,user_id,expires_at,created_at) VALUES (?,?,?,?,?)').bind(digest(token), version, userId, expiresAt, now),
-      db.prepare("DELETE FROM auth_login_limits WHERE key IN ('login','register')"),
+      ...(loginLimitKey ? [db.prepare('DELETE FROM auth_login_limits WHERE key=?').bind(loginLimitKey)] : []),
     ]);
     return { token, expiresAt };
   }
@@ -60,13 +60,15 @@ export function createAuthService(db: Database, config: AuthConfig, clock = Date
   return {
     async login(input: unknown) {
       const { username, password } = object(input, ['username', 'password']);
-      if (typeof username !== 'string' || !USERNAME.test(username) || typeof password !== 'string' || password.length < 1 || password.length > 1024) throw new ApiError(400, '请输入账号和密码');
+      if (typeof username !== 'string' || username.length < 1 || username.length > 128 || typeof password !== 'string' || password.length < 1 || password.length > 1024) throw new ApiError(400, '请输入账号和密码');
       const now = clock();
-      await limit('login', now);
       await ensureOwner();
       const row = await account(username);
+      // Use the matched identity so the limiter follows SQLite's NOCASE semantics.
+      const loginLimitKey = row ? `login:user:${row.id}` : 'login:missing';
+      await limit(loginLimitKey, now);
       if (!row || !await verifyPassword(password, row.password_hash)) throw new ApiError(401, '账号或密码不正确');
-      const session = await openSession(row.id, row.password_hash, now);
+      const session = await openSession(row.id, row.password_hash, now, loginLimitKey);
       return { ...session, user: { userId: row.id, displayName: row.username } };
     },
     async register(input: unknown) {
