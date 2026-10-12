@@ -86,6 +86,89 @@ try{
  await Promise.all(stage.wordIds.filter(id=>id!==first.id).slice(0,20).map(id=>api('/api/review',{wordId:id,rating:3,version:0,requestId:crypto.randomUUID()})));
  assert.equal(ok(await api('/api/state?language=en')).stats.todayNew,10);
  console.log('PASS atomic daily new-word quota under concurrency');
+
+ // Exercise quota changes only after proving the original ten-word cap above.
+ const capped=ok(await api('/api/state?language=en'));
+ let quota=capped.quota;
+ assert.ok(quota,'Learning state must expose the current daily quota');
+ assert.match(quota.day,/^\d{4}-\d{2}-\d{2}$/);
+ assert.ok(Number.isSafeInteger(quota.version));
+ assert.equal(quota.baseLimit,10);assert.equal(quota.limit,10);
+ assert.equal(quota.boostsUsed,0);assert.equal(quota.boostsRemaining,3);
+ assert.equal(quota.needsDecision,false);assert.deepEqual(quota.boosts,[]);
+ const japaneseQuota=ok(await api('/api/state?language=ja')).quota;
+ const firstBoost={language:'en',action:'boost',amount:10,day:quota.day,version:quota.version,requestId:crypto.randomUUID()};
+ assert.equal((await api('/api/quota',firstBoost,{Cookie:''})).status,401);
+ assert.equal((await api('/api/quota',firstBoost,{Origin:'https://other.invalid'})).status,403);
+ assert.equal((await api('/api/quota',firstBoost,{'Content-Type':'text/plain'})).status,415);
+ const malformed=await fetch(origin+basePath+'/api/quota',{method:'POST',headers:{Cookie:cookie,Origin:origin,'Content-Type':'application/json'},body:'{'});
+ assert.equal(malformed.status,400);
+ const invalidQuotaBodies=[
+  [],
+  {...firstBoost,language:'fr'},
+  {...firstBoost,action:'invented'},
+  {...firstBoost,amount:undefined},
+  {...firstBoost,amount:1},
+  {...firstBoost,version:-1},
+  {...firstBoost,version:1.5},
+  {...firstBoost,requestId:'not-a-uuid'},
+  {...firstBoost,unexpected:true},
+ ];
+ for(const body of invalidQuotaBodies)assert.equal((await api('/api/quota',body)).status,400,JSON.stringify(body));
+ assert.deepEqual(ok(await api('/api/state?language=en')).quota,quota,'Rejected quota requests must not consume a boost');
+
+ const firstBoostResult=ok(await api('/api/quota',firstBoost));
+ quota=firstBoostResult.quota;
+ assert.equal(quota.limit,20);assert.equal(quota.baseLimit,10);
+ assert.equal(quota.boostsUsed,1);assert.equal(quota.boostsRemaining,2);
+ assert.deepEqual(quota.boosts,[10]);assert.ok(quota.version>firstBoost.version);
+ assert.deepEqual(ok(await api('/api/quota',firstBoost)),firstBoostResult);
+ assert.equal((await api('/api/quota',{...firstBoost,requestId:crypto.randomUUID()})).status,409,'A stale quota version must not grant another boost');
+ assert.deepEqual(ok(await api('/api/state?language=ja')).quota,japaneseQuota,'English boosts must not change Japanese quota');
+ const boostedQueue=ok(await api('/api/study?language=en'));
+ assert.equal(boostedQueue.newRemaining,10);
+ const extraNewWord=boostedQueue.cards.find(card=>card.isNew);
+ assert.ok(extraNewWord,'A successful boost must make additional new words available');
+ ok(await api('/api/review',{wordId:extraNewWord.id,rating:3,version:extraNewWord.version,requestId:crypto.randomUUID()}));
+ assert.equal(ok(await api('/api/state?language=en')).stats.todayNew,11);
+ assert.equal(ok(await api('/api/state?language=ja')).stats.todayNew,0);
+
+ const secondBoost={language:'en',action:'boost',amount:1,day:quota.day,version:quota.version,requestId:crypto.randomUUID()};
+ for(const amount of [0,101,1.5,'2'])assert.equal((await api('/api/quota',{...secondBoost,amount})).status,400);
+ const secondBoostResult=ok(await api('/api/quota',secondBoost));
+ quota=secondBoostResult.quota;
+ assert.equal(quota.limit,21);assert.equal(quota.boostsUsed,2);assert.equal(quota.boostsRemaining,1);assert.deepEqual(quota.boosts,[10,1]);
+ assert.equal((await api('/api/quota',{...secondBoost,amount:2})).status,409,'A request ID cannot be reused for a different amount');
+ assert.deepEqual(ok(await api('/api/quota',firstBoost)),firstBoostResult,'Replaying an earlier boost must return its original receipt');
+ assert.deepEqual(ok(await api('/api/state?language=en')).quota,quota,'Replaying an earlier boost must not roll back current quota');
+ const thirdBoost={language:'en',action:'boost',amount:100,day:quota.day,version:quota.version,requestId:crypto.randomUUID()};
+ quota=ok(await api('/api/quota',thirdBoost)).quota;
+ assert.equal(quota.limit,121);assert.equal(quota.boostsUsed,3);assert.equal(quota.boostsRemaining,0);assert.deepEqual(quota.boosts,[10,1,100]);
+ assert.equal((await api('/api/quota',{...thirdBoost,amount:1,version:quota.version,requestId:crypto.randomUUID()})).status,409);
+ assert.deepEqual(ok(await api('/api/state?language=ja')).quota,japaneseQuota);
+ console.log('PASS quota authentication, CSRF, validation, additional new-word admission, three-boost cap, language isolation and idempotency');
+
+ // Changing the ordinary daily target adjusts the base; it never replenishes boosts.
+ ok(await api('/api/settings',{dailyNewLimit:15}));
+ const raisedBaseline=ok(await api('/api/state?language=en')).quota;
+ assert.equal(raisedBaseline.baseLimit,15);assert.equal(raisedBaseline.limit,126);
+ assert.equal(raisedBaseline.boostsUsed,3);assert.equal(raisedBaseline.boostsRemaining,0);
+ assert.deepEqual(raisedBaseline.boosts,[10,1,100]);assert.ok(raisedBaseline.version>quota.version);
+ ok(await api('/api/settings',{dailyNewLimit:10}));
+ const persistentQuota=ok(await api('/api/state?language=en')).quota;
+ assert.equal(persistentQuota.baseLimit,10);assert.equal(persistentQuota.limit,121);
+ assert.equal(persistentQuota.boostsUsed,3);assert.equal(persistentQuota.boostsRemaining,0);
+ assert.deepEqual(persistentQuota.boosts,[10,1,100]);
+ assert.equal((await api('/api/quota',{...thirdBoost,amount:1,version:persistentQuota.version,requestId:crypto.randomUUID()})).status,409);
+ const untouchedJapaneseQuota=ok(await api('/api/state?language=ja')).quota;
+ assert.equal(untouchedJapaneseQuota.limit,10);assert.equal(untouchedJapaneseQuota.boostsUsed,0);assert.equal(untouchedJapaneseQuota.boostsRemaining,3);
+ const japaneseBoost={language:'ja',action:'boost',amount:10,day:untouchedJapaneseQuota.day,version:untouchedJapaneseQuota.version,requestId:crypto.randomUUID()};
+ const persistentJapaneseQuota=ok(await api('/api/quota',japaneseBoost)).quota;
+ assert.equal(persistentJapaneseQuota.limit,20);assert.equal(persistentJapaneseQuota.boostsUsed,1);assert.equal(persistentJapaneseQuota.boostsRemaining,2);
+ assert.deepEqual(persistentJapaneseQuota.boosts,[10]);
+ assert.deepEqual(ok(await api('/api/state?language=en')).quota,persistentQuota,'Japanese boosts remain available after all three English boosts are used');
+ console.log('PASS baseline changes preserve daily boost history and the exhausted boost allowance');
+
  const now=Date.now();
  function seedMastered(count){
   const commands=[];
@@ -119,10 +202,15 @@ try{
  assert.equal((await api('/api/study?language=en&stageId='+next.id)).status,200);
  console.log('PASS forgetting reduces current mastery but keeps earned unlock');
  await stop();await start();
- const restored=ok(await api('/api/state?language=en'));assert.equal(restored.stages.find(s=>s.id===next.id).unlocked,true);assert.equal(restored.stats.todayNew,10);
+ const restored=ok(await api('/api/state?language=en'));assert.equal(restored.stages.find(s=>s.id===next.id).unlocked,true);assert.equal(restored.stats.todayNew,11);
+ assert.deepEqual(restored.quota,persistentQuota,'Daily quota must survive a process restart');
+ assert.deepEqual(ok(await api('/api/state?language=ja')).quota,persistentJapaneseQuota);
+ assert.deepEqual(ok(await api('/api/quota',secondBoost)),secondBoostResult,'Quota receipts must survive a process restart');
+ assert.deepEqual(ok(await api('/api/state?language=en')).quota,persistentQuota);
+ assert.equal((await api('/api/quota',{...thirdBoost,amount:1,version:persistentQuota.version,requestId:crypto.randomUUID()})).status,409,'Restarting must not replenish the daily boost allowance');
  ok(await api('/api/auth/logout',{}));assert.equal((await api('/api/state?language=en')).status,401);
- console.log('PASS process restart preserves sessions, learning records and earned unlocks; logout revokes session');
- console.log('ALL DOCKER-RUNTIME API ACCEPTANCE CHECKS PASSED');
+ console.log('PASS process restart preserves sessions, learning records, earned unlocks, quota and receipts; logout revokes session');
+ console.log('ALL NATIVE-RUNTIME API ACCEPTANCE CHECKS PASSED');
 }finally{
  await stop();sqlConnection?.close();fs.rmSync(fixture,{recursive:true,force:true});
  console.log('Removed only this run’s isolated temporary database.');

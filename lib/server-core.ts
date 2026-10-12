@@ -3,6 +3,7 @@ import { canChallenge, canOpen, dayKey, dayStart, hasMastery, recordReview } fro
 import { createExam, gradeExam, type ExamData } from './exams';
 import { ApiError, identifier, object } from './server-http';
 import type { Database } from './database';
+import { createDailyQuota } from './daily-quota';
 
 type User = {userId:string;displayName:string};
 type CardRow = {data:string};
@@ -19,14 +20,14 @@ export function createLearningService(db: Database, catalog: Catalog, user: User
   const words = new Map(catalog.words.map(word=>[word.id,word]));
   const stageMap = new Map(catalog.stages.map(stage=>[stage.id,stage]));
   const prepare = (sql:string,...values:(string|number|null)[]) => db.prepare(sql).bind(...values);
+  const quotas = createDailyQuota(db,user.userId,clock);
   async function load(language:Language) {
-    const [cardRows,grants,passed,setting] = await Promise.all([
+    const [cardRows,grants,passed] = await Promise.all([
       prepare('SELECT data FROM cards WHERE user_id=? AND language=?',user.userId,language).all<CardRow>(),
       prepare('SELECT stage_id FROM unlocks WHERE user_id=?',user.userId).all<{stage_id:string}>(),
       prepare('SELECT stage_id FROM passes WHERE user_id=?',user.userId).all<{stage_id:string}>(),
-      prepare('SELECT daily_new_limit FROM learners WHERE user_id=?',user.userId).first<{daily_new_limit:number}>(),
     ]);
-    return {progress:new Map(cardRows.results.map(row=>{const p=JSON.parse(row.data) as Progress;return [p.wordId,p]})),grants:new Set(grants.results.map(row=>row.stage_id)),passed:new Set(passed.results.map(row=>row.stage_id)),limit:setting?.daily_new_limit??10};
+    return {progress:new Map(cardRows.results.map(row=>{const p=JSON.parse(row.data) as Progress;return [p.wordId,p]})),grants:new Set(grants.results.map(row=>row.stage_id)),passed:new Set(passed.results.map(row=>row.stage_id))};
   }
   async function todayNew(language:Language,now:number) {
     const row = await prepare('SELECT COUNT(*) AS n FROM review_events WHERE user_id=? AND language=? AND new_word=1 AND created_at>=? AND created_at<?',user.userId,language,dayStart(now),dayStart(now)+86400000).first<{n:number}>();
@@ -39,7 +40,7 @@ export function createLearningService(db: Database, catalog: Catalog, user: User
     return stage.wordIds.filter(id=>{const card=progress.get(id);return card&&hasMastery(card,now)}).length;
   }
   async function state(language:Language) {
-    const now=clock(); const {progress,grants,passed,limit}=await load(language);
+    const now=clock(); const {progress,grants,passed}=await load(language);const quota=await quotas.current(language,now);
     const stages=catalog.stages.filter(stage=>stage.language===language).map(stage=>{
       const mastered=stageMastered(stage,progress,now); const total=stage.wordIds.length;const unlocked=canOpen(stage,grants);
       return {id:stage.id,courseId:stage.courseId,language:stage.language,title:stage.title,index:stage.index,prerequisiteId:stage.prerequisiteId,total,mastered,learned:stage.wordIds.filter(id=>progress.has(id)).length,percent:total?Math.floor(mastered/total*100):0,unlocked,passed:passed.has(stage.id),canTest:unlocked&&canChallenge(mastered,total)};
@@ -48,18 +49,18 @@ export function createLearningService(db: Database, catalog: Catalog, user: User
     const historyMap=new Map(historyRows.results.map(row=>[row.date,row]));
     const history=Array.from({length:14},(_,i)=>{const date=dayKey(now-(13-i)*86400000);return historyMap.get(date)??{date,reviews:0,newWords:0}});
     const today=history[history.length-1];const mastered=[...progress.values()].filter(p=>hasMastery(p,now)).length;
-    return {user:{name:user.displayName},language,settings:{dailyNewLimit:limit},stats:{mastered,learning:progress.size-mastered,due:[...progress.values()].filter(p=>p.due<=now).length,totalWords:catalog.words.filter(w=>w.language===language).length,todayReviews:today.reviews,todayNew:today.newWords,unlockedStages:stages.filter(s=>s.unlocked).length,totalStages:stages.length},courses:catalog.courses.filter(course=>course.language===language),stages,history,sources:catalog.sources};
+    return {user:{name:user.displayName},language,settings:{dailyNewLimit:quota.baseLimit},quota,stats:{mastered,learning:progress.size-mastered,due:[...progress.values()].filter(p=>p.due<=now).length,totalWords:catalog.words.filter(w=>w.language===language).length,todayReviews:today.reviews,todayNew:today.newWords,unlockedStages:stages.filter(s=>s.unlocked).length,totalStages:stages.length},courses:catalog.courses.filter(course=>course.language===language),stages,history,sources:catalog.sources};
   }
   async function study(language:Language,stageId?:string) {
-    const now=clock();const {progress,grants,limit}=await load(language);
+    const now=clock();const {progress,grants}=await load(language);const quota=await quotas.current(language,now);
     let stages=catalog.stages.filter(stage=>stage.language===language&&canOpen(stage,grants));
     if(stageId){const stage=stageFor(stageId);if(stage.language!==language)throw new ApiError(400,'阶段与语言不匹配');if(!canOpen(stage,grants))throw new ApiError(403,'请先解锁这个阶段');stages=[stage]}
     const accessible=[...new Set(stages.flatMap(stage=>stage.wordIds))];
     const due=accessible.map(id=>progress.get(id)).filter((p):p is Progress=>Boolean(p&&p.due<=now)).sort((a,b)=>a.due-b.due||a.wordId.localeCompare(b.wordId));
-    const newRemaining=Math.max(0,limit-await todayNew(language,now));
+    const newRemaining=quota.needsDecision?0:Math.max(0,quota.limit-await todayNew(language,now));
     const selected=due.slice(0,50).map(p=>({id:p.wordId,version:p.version,isNew:false}));
     for(const id of accessible.filter(id=>!progress.has(id)).slice(0,Math.min(newRemaining,50-selected.length)))selected.push({id,version:0,isNew:true});
-    return {cards:selected.map(item=>({...words.get(item.id)!,version:item.version,isNew:item.isNew})),newRemaining,dueCount:due.length};
+    return {cards:selected.map(item=>({...words.get(item.id)!,version:item.version,isNew:item.isNew})),newRemaining,dueCount:due.length,quota};
   }
   async function review(input:unknown):Promise<ReviewResult> {
     const data=object(input,['wordId','rating','version','requestId']);const wordId=identifier(data.wordId);const word=words.get(wordId);
@@ -75,18 +76,24 @@ export function createLearningService(db: Database, catalog: Catalog, user: User
     const prior=await readReceipt();if(prior)return prior;
     // Another copy can commit after the first receipt lookup but before these reads.
     const conflict=async(message:string):Promise<ReviewResult>=>{const saved=await readReceipt();if(saved)return saved;throw new ApiError(409,message)};
-    const now=clock();const {progress,grants,limit}=await load(word.language);const previous=progress.get(wordId)??null;
+    const now=clock();const {progress,grants}=await load(word.language);const previous=progress.get(wordId)??null;
     if(!catalog.stages.some(stage=>stage.language===word.language&&stage.wordIds.includes(wordId)&&canOpen(stage,grants)))throw new ApiError(403,'请先解锁该单词所在阶段');
     if((previous?.version??0)!==version)return conflict('学习记录已更新，请刷新后重试');
     if(previous&&previous.due>now)return conflict('这个单词尚未到复习时间');
-    if(!previous&&await todayNew(word.language,now)>=limit)return conflict('今天的新词目标已完成');
+    if(!previous){
+      const quota=await quotas.current(word.language,now);
+      if(quota.needsDecision)return conflict('请先选择保留或重置之前增加的额度');
+      if(await todayNew(word.language,now)>=quota.limit)return conflict('今天的新词目标已完成');
+    }
     const next=recordReview(previous,word,Number(rating),now,requestId);const response={nextDue:new Date(next.due).toISOString(),isMastered:next.mastered};
     const receipt=JSON.stringify({response,rating,version});
+    if(dayKey(clock())!==dayKey(now))return conflict('日期已变化，请刷新后重试');
     await db.batch([
       prepare(`INSERT INTO cards (user_id,word_id,language,data,version,due,last_request)
  SELECT ?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM review_events WHERE user_id=? AND request_id=?)
- AND (? > 0 OR (SELECT COUNT(*) FROM review_events WHERE user_id=? AND language=? AND new_word=1 AND created_at>=? AND created_at<?) < COALESCE((SELECT daily_new_limit FROM learners WHERE user_id=?),10))
- ON CONFLICT(user_id,word_id) DO UPDATE SET data=excluded.data,version=excluded.version,due=excluded.due,last_request=excluded.last_request WHERE cards.version=? AND cards.due<=?`,user.userId,wordId,word.language,JSON.stringify(next),next.version,next.due,requestId,user.userId,requestId,Number(version),user.userId,word.language,dayStart(now),dayStart(now)+86400000,user.userId,Number(version),now),
+ AND (? > 0 OR EXISTS (SELECT 1 FROM daily_quotas q WHERE q.user_id=? AND q.language=? AND q.day=? AND q.decision<>'pending'
+   AND (SELECT COUNT(*) FROM review_events WHERE user_id=? AND language=? AND new_word=1 AND created_at>=? AND created_at<?) < q.quota_limit))
+ ON CONFLICT(user_id,word_id) DO UPDATE SET data=excluded.data,version=excluded.version,due=excluded.due,last_request=excluded.last_request WHERE cards.version=? AND cards.due<=?`,user.userId,wordId,word.language,JSON.stringify(next),next.version,next.due,requestId,user.userId,requestId,Number(version),user.userId,word.language,dayKey(now),user.userId,word.language,dayStart(now),dayStart(now)+86400000,Number(version),now),
       prepare(`INSERT INTO review_events (user_id,request_id,word_id,language,created_at,new_word,result)
  SELECT ?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM cards WHERE user_id=? AND word_id=? AND last_request=? AND version=?)
  ON CONFLICT(user_id,request_id) DO NOTHING`,user.userId,requestId,wordId,word.language,now,previous?0:1,receipt,user.userId,wordId,requestId,next.version),
@@ -95,7 +102,7 @@ export function createLearningService(db: Database, catalog: Catalog, user: User
   }
   async function settings(input:unknown) {
     const {dailyNewLimit}=object(input,['dailyNewLimit']);if(!Number.isInteger(dailyNewLimit)||Number(dailyNewLimit)<5||Number(dailyNewLimit)>50)throw new ApiError(400,'每日新词数量须为 5–50 的整数');
-    await prepare('INSERT INTO learners (user_id,daily_new_limit) VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET daily_new_limit=excluded.daily_new_limit',user.userId,Number(dailyNewLimit)).run();return {dailyNewLimit:Number(dailyNewLimit)};
+    return quotas.setBase(Number(dailyNewLimit));
   }
   async function startExam(input:unknown) {
     const {stageId}=object(input,['stageId']);const stage=stageFor(stageId);const now=clock();const {progress,grants}=await load(stage.language);
@@ -129,5 +136,5 @@ export function createLearningService(db: Database, catalog: Catalog, user: User
     const saved=await prepare('SELECT result FROM exams WHERE id=? AND user_id=?',id,user.userId).first<{result:string|null}>();
     if(!saved?.result)throw new ApiError(409,'试卷状态已改变，请刷新后重试');return JSON.parse(saved.result);
   }
-  return {state,study,review,settings,startExam,submitExam};
+  return {state,study,review,settings,startExam,submitExam,adjustQuota:quotas.adjust};
 }

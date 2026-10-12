@@ -14,7 +14,7 @@ const catalog={courses:[],sources:[],words,stages:[
   {id:'ja-1',courseId:'ja',language:'ja',title:'日本語',index:1,prerequisiteId:null,wordIds:words.slice(25).map(w=>w.id)},
 ]};
 function setup(hooks = {}) {
-  const sql=new DatabaseSync(':memory:'); sql.exec(readFileSync(new URL('../drizzle/0000_amazing_old_lace.sql',import.meta.url),'utf8'));
+  const sql=new DatabaseSync(':memory:');for(const file of ['0000_amazing_old_lace.sql','0003_daily_quota.sql'])sql.exec(readFileSync(new URL(`../drizzle/${file}`,import.meta.url),'utf8'));
   const stmt=(query,values=[])=>({query,values,bind(...args){return stmt(query,args)},async all(){return {results:sql.prepare(query).all(...values)}},async first(){const row=sql.prepare(query).get(...values)??null;await hooks.afterFirst?.(query,row);return row},async run(){const r=sql.prepare(query).run(...values);return {meta:{changes:Number(r.changes)}}}});
   const db={prepare:stmt,async batch(stmts){sql.exec('BEGIN');try{const r=[];for(const s of stmts){const changed=sql.prepare(s.query).run(...s.values);r.push({meta:{changes:Number(changed.changes)}});}sql.exec('COMMIT');return r}catch(e){sql.exec('ROLLBACK');throw e}}};
   let now=time; const service=createLearningService(db,catalog,{userId:'u1',displayName:'User'},()=>now);

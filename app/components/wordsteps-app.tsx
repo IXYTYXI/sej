@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUpRight, BookOpen, ChartNoAxesCombined, ChevronRight, Leaf, LogOut, Settings2, Sparkles, Sun } from "lucide-react";
-import { api, type AppState, type Language, type Stage, type Tab, languageName } from "./types";
+import { api, type AppState, type DailyQuota, type Language, type Stage, type Tab, languageName } from "./types";
 import { ErrorNotice, Loading } from "./ui";
 import { Today } from "./today";
 import { Library } from "./library";
@@ -12,6 +12,7 @@ import { StudySession } from "./study-session";
 import { ExamSession } from "./exam-session";
 import { AILearning } from "./ai-learning";
 import { appPath } from "../../lib/paths";
+import { DailyQuotaPanel } from "./daily-quota";
 
 const tabs = [
   { id: "today" as const, label: "今日学习", short: "今日", icon: Sun },
@@ -32,18 +33,47 @@ export default function WordstepsApp({ initialName }: { initialName: string }) {
   const [study, setStudy] = useState<{ stageId?: string; title?: string } | null>(null);
   const [exam, setExam] = useState<Stage | null>(null);
   const requestNumber = useRef(0);
-  const load = useCallback(async () => {
+  const load = useCallback(async (strict = false) => {
     const request = ++requestNumber.current;
     setError(null);
     try {
       const result = await api<AppState>(`/api/state?language=${language}`);
       if (request === requestNumber.current) setState(result);
-    } catch (cause) { if (request === requestNumber.current) setError(cause); }
+    } catch (cause) { if (strict) throw cause; if (request === requestNumber.current) setError(cause); }
     finally { if (request === requestNumber.current) setLoading(false); }
   }, [language]);
   useEffect(() => { setLoading(true); setState(null); void load(); return () => { requestNumber.current++; }; }, [load]);
+  const refreshState = useCallback(async () => { await load(true); }, [load]);
+  const updateQuota = useCallback(async (quota: DailyQuota) => {
+    setState(current => {
+      if (!current || current.language !== language) return current;
+      const latest = current.quota;
+      if (latest.day > quota.day || (latest.day === quota.day && latest.version > quota.version)) return current;
+      return { ...current, quota };
+    });
+    await load(true);
+  }, [language, load]);
+  useEffect(() => {
+    let lastRefresh = 0;
+    let day = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+    const refreshOnResume = () => {
+      if (document.visibilityState !== "visible" || Date.now() - lastRefresh < 1000) return;
+      lastRefresh = Date.now();
+      day = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+      void load();
+    };
+    const timer = window.setInterval(() => {
+      const nextDay = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+      if (nextDay !== day) { day = nextDay; void load(); }
+    }, 15000);
+    window.addEventListener("focus", refreshOnResume);
+    window.addEventListener("pageshow", refreshOnResume);
+    document.addEventListener("visibilitychange", refreshOnResume);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", refreshOnResume); window.removeEventListener("pageshow", refreshOnResume); document.removeEventListener("visibilitychange", refreshOnResume); };
+  }, [load]);
   const changeLanguage = (next: Language) => { if (next !== language) { setState(null); setLoading(true); setLanguage(next); } };
   const nav = (id: Tab) => { setTab(id); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  const openQuota = () => { setStudy(null); setTab("today"); window.setTimeout(() => { const panel = document.getElementById("daily-quota"); panel?.scrollIntoView({ block: "start", behavior: "smooth" }); panel?.focus({ preventScroll: true }); }, 0); };
   const start = (stage?: Stage) => { if (!stage || stage.unlocked) setStudy({ stageId: stage?.id, title: stage?.title }); };
   const date = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long", timeZone: "Asia/Shanghai" }).format(new Date());
   const name = state?.user.name || initialName;
@@ -68,17 +98,18 @@ export default function WordstepsApp({ initialName }: { initialName: string }) {
         <ErrorNotice error={logoutError} retry={() => void logout()} />
         <ErrorNotice error={error} retry={() => { setLoading(true); void load(); }} />
         {loading && !state ? <Loading /> : state ? <>
-          {tab === "today" && <Today state={state} start={start} openLibrary={() => nav("library")} openExam={setExam} />}
+          <DailyQuotaPanel key={`${language}:${state.quota.day}`} language={language} quota={state.quota} todayNew={state.stats.todayNew} hidden={tab !== "today" && !state.quota.needsDecision} onChanged={updateQuota} onRefresh={refreshState} />
+          {tab === "today" && <Today state={state} start={start} openLibrary={() => nav("library")} openExam={setExam} openQuota={openQuota} />}
           {tab === "library" && <Library state={state} start={start} openExam={setExam} />}
           {tab === "progress" && <Progress state={state} />}
           {tab === "ai" && <AILearning key={language} state={state} />}
-          {tab === "settings" && <Settings key={language} state={state} onSaved={load} />}
+          {tab === "settings" && <Settings key={language} state={state} onSaved={refreshState} />}
         </> : !error && <div className="empty-state"><Sparkles size={30} /><h2>你的学习空间正在准备</h2><p>词库就绪后，就能从第一阶开始。</p><button className="button primary" onClick={() => void load()}>刷新词库</button></div>}
         <footer className="page-footer"><span className="mini-mark">词阶</span><span>不赶路，记得住。</span><button onClick={() => nav("settings")}>学习规则与数据来源 <ArrowUpRight size={13} /></button></footer>
       </main>
     </div>
     <nav className="mobile-nav" aria-label="移动端主导航">{tabs.map(({ id, short, icon: Icon }) => <button key={id} className={tab === id ? "active" : ""} onClick={() => nav(id)} aria-current={tab === id ? "page" : undefined}><Icon size={21} strokeWidth={1.7} /><span>{short}</span></button>)}</nav>
-    {study && <StudySession language={language} stageId={study.stageId} title={study.title} onClose={() => { setStudy(null); void load(); }} onChange={load} />}
+    {study && state && <StudySession language={language} stageId={study.stageId} title={study.title} quota={state.quota} todayNew={state.stats.todayNew} onManageQuota={openQuota} onClose={() => { setStudy(null); void load(); }} onChange={refreshState} />}
     {exam && <ExamSession stage={exam} onClose={() => { setExam(null); void load(); }} onChange={load} />}
   </div>;
 }
