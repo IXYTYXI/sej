@@ -3,6 +3,6 @@
 # Do not use handle_path: Next is built with /study and expects that prefix.
 @wordsteps path /study /study/*
 handle @wordsteps {
-    reverse_proxy 127.0.0.1:3100
+	reverse_proxy wordsteps:3000
 }
 # Existing main-site routes follow in their original catch-all handle.

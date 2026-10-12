@@ -1,6 +1,7 @@
 name: wordsteps
 services:
   app:
+    container_name: wordsteps
     image: wordsteps:${WORDSTEPS_VERSION:-local}
     build:
       context: .
@@ -14,10 +15,13 @@ services:
       NEXT_PUBLIC_BASE_PATH: /study
       DATABASE_PATH: /data/wordsteps.sqlite
       AUTH_PASSWORD_HASH_FILE: /run/secrets/auth_password_hash
+      REGISTRATION_CODE_FILE: /run/secrets/registration_code
       ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
       OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
     ports:
       - "127.0.0.1:${WORDSTEPS_PORT:-3100}:3000"
+    networks:
+      - apps
     volumes:
       - learning_data:/data
       - ./secrets:/run/secrets:ro
@@ -42,3 +46,7 @@ services:
 volumes:
   learning_data:
     name: wordsteps_learning_data
+networks:
+  apps:
+    external: true
+    name: apps_internal

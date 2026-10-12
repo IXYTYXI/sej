@@ -14,7 +14,8 @@
 
 | 文件 | 内容 |
 |---|---|
-| `auth_password_hash` | 使用 `scripts/hash-password.mjs` 由 stdin 接收至少 12 字符的独立登录密码，输出 scrypt hash |
+| `auth_password_hash` | 使用 `scripts/hash-password.mjs` 由 stdin 接收至少 12 字符的独立登录密码，输出 scrypt hash。这是初始账号 `AUTH_USERNAME` 的密码 |
+| `registration_code` | 至少 8 个字符的邀请码。没有邀请码不能注册；每个注册账号单独计算每天 30 次 AI 额度 |
 | `anthropic_api_key` | Claude 接口的真实密钥 |
 | `openai_api_key` | OpenAI 接口的真实密钥；未提供可为空 |
 
@@ -34,7 +35,7 @@ curl --fail http://127.0.0.1:3100/study/api/health
 
 健康检查同时验证账号配置和数据库。未配置有效密码 hash 时返回 503，避免把无认证应用当作已就绪。
 
-备份现有 Caddy 配置，将 `deploy/Caddyfile.fragment` 中的匹配路由合并进现有 `xairlab.com` 站点块，不替换主站。通过 `caddy validate` 后再使用现有服务的平滑 reload 方式加载。若 Caddy 自己也在容器中，`127.0.0.1` 指向代理容器自身，应通过现有网络把 upstream 指向应用容器，并取消不必要的宿主绑定。
+备份现有 Caddy 配置，将 `deploy/Caddyfile.fragment` 中的匹配路由合并进现有 `xairlab.com` 站点块，不替换主站。通过 `caddy validate` 后再使用现有服务的平滑 reload 方式加载。若 Caddy 自己也在容器中，`127.0.0.1` 指向代理容器自身。本机 Caddy 与应用同在 `apps_internal` 网络，upstream 使用容器名 `wordsteps:3000`。
 
 最后检查 HTTPS 下登录、背词、AI 报告以及主站原有页面。远程未成功执行这些步骤前，不应声称已部署。
 

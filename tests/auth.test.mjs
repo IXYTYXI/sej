@@ -29,7 +29,7 @@ test('sessions store only token hashes, expire, revoke, and reject forged OAI he
   const { hashPassword } = await import('../lib/auth-password.ts');
   const db = openDatabase(':memory:');
   let now = 1_800_000_000_000;
-  const config = { username: 'yc', passwordHash: await hashPassword('test-password-not-for-production') };
+  const config = { username: 'yc', passwordHash: await hashPassword('test-password-not-for-production'), registrationCode: 'invite-code-for-tests' };
   const auth = createAuthService(db, config, () => now);
   try {
     const session = await auth.login({ username: 'yc', password: 'test-password-not-for-production' });
@@ -52,6 +52,25 @@ test('sessions store only token hashes, expire, revoke, and reject forged OAI he
   } finally { db.close(); }
 });
 
+test('registration needs the invite code and keeps a separate user and AI identity', async () => {
+  const { openDatabase } = await import('../db/sqlite.ts');
+  const { createAuthService, SESSION_COOKIE } = await import('../lib/auth-core.ts');
+  const { hashPassword } = await import('../lib/auth-password.ts');
+  const db = openDatabase(':memory:');
+  const config = { username: 'yc', passwordHash: await hashPassword('test-password-not-for-production'), registrationCode: 'invite-code-for-tests' };
+  const auth = createAuthService(db, config);
+  try {
+    await assert.rejects(auth.register({ username: 'friend', password: 'another-password-ok', inviteCode: 'wrong-invite-code' }), { status: 403 });
+    const session = await auth.register({ username: 'friend', password: 'another-password-ok', inviteCode: 'invite-code-for-tests' });
+    assert.notEqual(session.user.userId, 'owner');
+    assert.equal(session.user.displayName, 'friend');
+    assert.equal((await auth.userForHeaders(new Headers({ cookie: `${SESSION_COOKIE}=${session.token}` }))).userId, session.user.userId);
+    await assert.rejects(auth.register({ username: 'Friend', password: 'another-password-ok', inviteCode: 'invite-code-for-tests' }), { status: 409 });
+    const owner = await auth.login({ username: 'yc', password: 'test-password-not-for-production' });
+    assert.equal(owner.user.userId, 'owner');
+  } finally { db.close(); }
+});
+
 test('auth configuration accepts a mounted hash file, defaults to yc and fails closed without a valid hash', async () => {
   const { getAuthConfig } = await import('../lib/auth-config.ts');
   const { hashPassword } = await import('../lib/auth-password.ts');
@@ -60,7 +79,7 @@ test('auth configuration accepts a mounted hash file, defaults to yc and fails c
     const passwordHash = await hashPassword('test-password-not-for-production');
     const path = join(directory, 'password-hash');
     writeFileSync(path, passwordHash + '\n', { mode: 0o600 });
-    assert.deepEqual(getAuthConfig({ AUTH_PASSWORD_HASH_FILE: path }), { username: 'yc', passwordHash });
+    assert.deepEqual(getAuthConfig({ AUTH_PASSWORD_HASH_FILE: path }), { username: 'yc', passwordHash, registrationCode: '' });
     assert.throws(() => getAuthConfig({}), { status: 503 });
     assert.throws(() => getAuthConfig({ AUTH_PASSWORD_HASH: 'plaintext' }), { status: 503 });
   } finally { rmSync(directory, { recursive: true, force: true }); }
