@@ -35,7 +35,7 @@ export type ExamResult = { score: number; total: number; passed: boolean; unlock
   results: { prompt: string; correct: boolean; answer: string; chosen: string }[] };
 export type AIProviderId = "anthropic" | "openai";
 export type AIProvider = { id: AIProviderId; label: string; model: string; enabled: boolean };
-export type AIStatus = { providers: AIProvider[]; defaultProvider: AIProviderId | null; dailyLimit: number; usedToday: number };
+export type AIStatus = { providers: AIProvider[]; defaultProvider: AIProviderId | null; dailyLimit: number | null; usedToday: number };
 export type AIMessage = { role: "user" | "assistant"; content: string };
 export type AIRequest = { action: "report" | "hint" | "chat"; language: Language; provider: AIProviderId;
   wordId?: string; messages?: AIMessage[]; requestId: string };

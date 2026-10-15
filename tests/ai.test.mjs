@@ -166,6 +166,19 @@ test('daily allowance is global across providers, failures count once and local 
   assert.equal(calls,31);
 });
 
+test('owner has unlimited AI calls while registered users keep the daily limit',async()=>{
+  let calls=0;
+  const {service}=setup(async()=>{calls++;return Response.json({choices:[{message:{content:'ok'}}]})});
+  for(let i=0;i<31;i++) await service('owner').run(input('chat',{messages:[{role:'user',content:`owner turn ${i}`}]}));
+  const ownerStatus=await service('owner').status();
+  assert.equal(ownerStatus.dailyLimit,null);
+  assert.equal(ownerStatus.usedToday,31);
+  for(let i=0;i<30;i++) await service('registered-user').run(input('chat',{messages:[{role:'user',content:`user turn ${i}`}]}));
+  await assert.rejects(service('registered-user').run(input('chat')),{status:429});
+  assert.equal((await service('registered-user').status()).dailyLimit,30);
+  assert.equal(calls,61);
+});
+
 test('upstream failure is redacted, releases concurrency and is not returned as successful content',async()=>{
   let calls=0;
   const {service}=setup(async()=>{calls++;if(calls===1)return new Response('test-openai-key secret upstream diagnostic',{status:500});return Response.json({choices:[{message:{content:'recovered'}}]})});

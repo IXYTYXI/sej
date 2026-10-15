@@ -51,6 +51,7 @@ function instructions(language:Language):string {
 
 export function createAiService(db:Database,catalog:Catalog,user:{userId:string;displayName?:string},providers:ProviderConfig[],options:{clock?:()=>number;fetch?:FetchLike} = {}) {
   const clock = options.clock ?? Date.now;
+  const unlimited = user.userId === 'owner';
   const words = new Map(catalog.words.map(word=>[word.id,word]));
   const prepare = (sql:string,...values:(string|number|null)[]) => db.prepare(sql).bind(...values);
 
@@ -60,7 +61,7 @@ export function createAiService(db:Database,catalog:Catalog,user:{userId:string;
   }
 
   async function status() {
-    return {providers:providers.map(({id,label,model,enabled})=>({id,label,model,enabled})),defaultProvider:providers.find(provider=>provider.enabled)?.id ?? null,dailyLimit:DAILY_LIMIT,usedToday:await usedToday(clock())};
+    return {providers:providers.map(({id,label,model,enabled})=>({id,label,model,enabled})),defaultProvider:providers.find(provider=>provider.enabled)?.id ?? null,dailyLimit:unlimited ? null : DAILY_LIMIT,usedToday:await usedToday(clock())};
   }
 
   async function promptFor(data:AiInput,now:number):Promise<ModelPrompt> {
@@ -137,12 +138,12 @@ export function createAiService(db:Database,catalog:Catalog,user:{userId:string;
     const admitted = await prepare(`INSERT INTO ai_requests (user_id,request_id,fingerprint,provider,model,status,charged,created_at,expires_at)
       SELECT ?,?,?,?,?,'pending',1,?,?
       WHERE NOT EXISTS (SELECT 1 FROM ai_requests WHERE user_id=? AND status='pending' AND expires_at>?)
-      AND (SELECT COALESCE(SUM(charged),0) FROM ai_requests WHERE user_id=? AND created_at>=? AND created_at<?) < ?
-      ON CONFLICT(user_id,request_id) DO NOTHING`,user.userId,data.requestId,fingerprint,provider.id,provider.model,now,now+REQUEST_LEASE_MS,user.userId,now,user.userId,dayStart(now),dayStart(now)+86400000,DAILY_LIMIT).run();
+      AND (? = 1 OR (SELECT COALESCE(SUM(charged),0) FROM ai_requests WHERE user_id=? AND created_at>=? AND created_at<?) < ?)
+      ON CONFLICT(user_id,request_id) DO NOTHING`,user.userId,data.requestId,fingerprint,provider.id,provider.model,now,now+REQUEST_LEASE_MS,user.userId,now,unlimited ? 1 : 0,user.userId,dayStart(now),dayStart(now)+86400000,DAILY_LIMIT).run();
     if (!admitted.meta.changes) {
       const existing = await receipt();
       if (existing) return existing;
-      if (await usedToday(now) >= DAILY_LIMIT) throw new ApiError(429,'今天的 AI 使用额度已用完，请明天再来');
+      if (!unlimited && await usedToday(now) >= DAILY_LIMIT) throw new ApiError(429,'今天的 AI 使用额度已用完，请明天再来');
       throw new ApiError(429,'已有一个 AI 请求正在处理中，请稍后再试');
     }
     try {

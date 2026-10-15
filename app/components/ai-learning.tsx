@@ -33,7 +33,7 @@ function useAIService() {
     .finally(() => { if (mounted.current) setLoading(false); }), []);
   useEffect(() => { mounted.current = true; void refresh(); return () => { mounted.current = false; }; }, [refresh]);
   return { status, provider, setProvider, loading, error, refresh, mounted,
-    exhausted: Boolean(status && status.usedToday >= status.dailyLimit) };
+    exhausted: Boolean(status && status.dailyLimit !== null && status.usedToday >= status.dailyLimit) };
 }
 
 function ProviderControls({ service, busy, compact = false }: {
@@ -49,7 +49,7 @@ function ProviderControls({ service, busy, compact = false }: {
       </select>
       {!compact && <button className="icon-button" type="button" aria-label="刷新 AI 服务状态" title="刷新服务状态，不会调用模型" onClick={() => void refresh()} disabled={busy || loading}><RefreshCw size={16} /></button>}
     </div>
-    {status && <div className="ai-service-status"><div className="ai-provider-badges">{status.providers.map(item => <span key={item.id} className={item.enabled ? "available" : "unavailable"}><i />{item.label} · {item.enabled ? "可用" : "未配置"}</span>)}</div><span className={exhausted ? "ai-quota exhausted" : "ai-quota"}>今日 {status.usedToday} / {status.dailyLimit} 次</span></div>}
+    {status && <div className="ai-service-status"><div className="ai-provider-badges">{status.providers.map(item => <span key={item.id} className={item.enabled ? "available" : "unavailable"}><i />{item.label} · {item.enabled ? "可用" : "未配置"}</span>)}</div><span className={exhausted ? "ai-quota exhausted" : "ai-quota"}>{status.dailyLimit === null ? `今日已用 ${status.usedToday} 次 · 不限` : `今日 ${status.usedToday} / ${status.dailyLimit} 次`}</span></div>}
     {!loading && status && !provider && <p className="ai-config-note">AI 服务尚未启用。管理员配置好服务后即可使用，你可以照常学习和复习。</p>}
     {exhausted && <p className="ai-config-note">今日 AI 额度已用完，明天再继续。英语、日语及不同 AI 服务共用此额度。</p>}
     <ErrorNotice error={error} retry={() => void refresh()} />
