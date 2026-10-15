@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { AlertCircle, ArrowUpRight, LoaderCircle, X } from "lucide-react";
+import { Dialog } from "radix-ui";
 import { ApiError } from "./types";
 import { appPath } from "../../lib/paths";
 
@@ -23,30 +24,23 @@ export function Modal({ children, title, onClose, busy = false }: {
   children: React.ReactNode; title: string; onClose: () => void; busy?: boolean;
 }) {
   const dialog = useRef<HTMLDivElement>(null);
-  const close = useRef(onClose);
-  const busyRef = useRef(busy);
-  useEffect(() => { close.current = onClose; busyRef.current = busy; }, [onClose, busy]);
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    const oldOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    dialog.current?.focus();
-    function keydown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !busyRef.current) close.current();
-      if (event.key !== "Tab") return;
-      const buttons = dialog.current?.querySelectorAll<HTMLElement>("button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex='0']");
-      if (!buttons?.length) return;
-      const first = buttons[0], last = buttons[buttons.length - 1];
-      if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.current)) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-    }
-    document.addEventListener("keydown", keydown);
-    return () => { document.body.style.overflow = oldOverflow; document.removeEventListener("keydown", keydown); previous?.focus(); };
-  }, []);
-  return <div className="modal-backdrop"><div className="focus-modal" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={dialog}>
-    <div className="modal-heading"><span className="eyebrow">WORDSTEPS / {title}</span><button className="icon-button" onClick={onClose} disabled={busy} aria-label="关闭学习窗口"><X size={22} /></button></div>
-    {children}
-  </div></div>;
+  const previous = useRef<HTMLElement | null>(null);
+  return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onClose(); }}>
+    <Dialog.Portal><Dialog.Overlay className="modal-backdrop">
+      <Dialog.Content className="focus-modal" ref={dialog} aria-describedby={undefined}
+        onOpenAutoFocus={event => { event.preventDefault(); previous.current = document.activeElement as HTMLElement | null; dialog.current?.focus(); }}
+        onCloseAutoFocus={event => {
+          event.preventDefault();
+          // Keep an intentional destination focus (for example, the quota panel).
+          if (document.activeElement === document.body || dialog.current?.contains(document.activeElement)) previous.current?.focus();
+        }}
+        onInteractOutside={event => event.preventDefault()}
+        onEscapeKeyDown={event => { if (busy) event.preventDefault(); }}>
+        <div className="modal-heading"><Dialog.Title className="modal-title"><span>WORDSTEPS</span>{title}</Dialog.Title><Dialog.Close asChild><button type="button" className="icon-button" disabled={busy} aria-label={`关闭${title}窗口`}><X size={21} /></button></Dialog.Close></div>
+        {children}
+      </Dialog.Content>
+    </Dialog.Overlay></Dialog.Portal>
+  </Dialog.Root>;
 }
 
 export function ProgressBar({ value, label }: { value: number; label: string }) {

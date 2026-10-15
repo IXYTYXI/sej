@@ -1,13 +1,96 @@
-.daily-quota-panel { margin-bottom: 26px; padding: 24px 27px; border: 1px solid #dfe7d4; border-radius: 15px; background: #f3f7ed; scroll-margin-top: 85px; }
-.daily-quota-panel[hidden] { display: none; }.daily-quota-panel.decision { background: #fcf4e9; border-color: #ecdcc4; }
-.quota-heading { display: flex; align-items: center; gap: 14px; }.quota-symbol { width: 43px; height: 43px; display: grid; place-items: center; border-radius: 50%; color: #8aa174; background: #e7efdc; flex-shrink: 0; }.decision .quota-symbol { color: #b49169; background: #f4e7d4; }
-.quota-heading h2 { margin: 7px 0 0; font-size: 17px; font-weight: 500; color: #567247; line-height: 1.6; }.decision .quota-heading h2 { color: #93714d; }.quota-heading .section-eyebrow { font-size: 8px; letter-spacing: 1.6px; }.quota-chances { margin-left: auto; font-size: 10px; color: #92a27f; white-space: nowrap; }.quota-chances strong { font-size: 17px; font-weight: 500; margin-inline: 3px; color: #6c8b52; }
-.quota-description, .quota-note { color: #96a487; line-height: 1.9; font-size: 10px; margin-top: 15px; }.quota-description { font-size: 12px; }.decision .quota-description, .decision .quota-note { color: #ac9274; }
-.quota-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 11px 24px; margin-top: 20px; color: #93a080; font-size: 11px; }.quota-summary strong { color: #5e7e4a; font-size: 18px; font-weight: 400; margin-inline: 3px; }.quota-summary > span:last-child { margin-left: auto; font-size: 10px; color: #a8b398; }
-.quota-adjust-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 20px; }.quota-amount { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 11px; color: #80966c; }.quota-amount input { width: 70px; padding: 9px 10px; border-radius: 7px; border: 1px solid #d7e2ca; color: #4e703d; background: #fffefa; font-size: 14px; text-align: center; }.quota-amount input[aria-invalid="true"] { border-color: #c89572; }.quota-fixed { display: flex; align-items: center; gap: 4px; }.quota-fixed strong { font-weight: 500; }.quota-preview { flex-basis: 100%; font-size: 10px; color: #9aa98c; margin-top: 3px; }.quota-preview strong { color: #739159; font-weight: 500; }.quota-adjust-row > button { flex-shrink: 0; font-size: 11px; }
-.quota-decision-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }.quota-decision-actions .button { font-size: 11px; }.quota-boost-history { margin-top: 15px; font-size: 10px; color: #8b9e77; }.quota-exhausted { margin-top: 19px; display: flex; align-items: flex-start; gap: 8px; font-size: 11px; line-height: 1.8; color: #8b9c79; }
-.quota-notice { display: flex; align-items: flex-start; gap: 8px; padding: 12px 14px; margin-top: 15px; border-radius: 8px; background: #e8f0df; font-size: 11px; line-height: 1.8; color: #729158; }.quota-notice > svg { margin-top: 2px; }.quota-uncertain { color: #a48364; line-height: 1.9; font-size: 11px; margin-top: 14px; }.quota-refresh-error { background: #fbefe4; border: 1px solid #eddcc8; border-radius: 9px; padding: 14px; margin-top: 14px; }.quota-refresh-error p { color: #ad8963; font-size: 11px; line-height: 1.8; }.quota-refresh-error button { margin-top: 9px; font-size: 10px; }
-.quota-dismiss { margin-left: auto; flex-shrink: 0; font-size: 10px; }
-.quota-study-notice { background: #fbf1e4; padding: 16px; border: 1px solid #ebdcc5; border-radius: 10px; margin-bottom: 20px; }.quota-study-notice p { color: #a28b6e; font-size: 11px; line-height: 1.9; }.quota-study-notice button { margin-top: 10px; font-size: 10px; }.quota-study-decision { padding: 35px 28px; text-align: center; }.quota-study-decision h2 { color: #668750; font-size: 22px; font-weight: 500; line-height: 1.8; }.quota-study-decision > p { margin: 16px 0 23px; color: #95a682; font-size: 12px; line-height: 1.9; }.quota-study-decision .finish-actions { justify-content: center; }.quota-next-note { margin: 15px 0 0; color: #9aac88; font-size: 10px; line-height: 1.9; }
-@media (max-width: 760px) { .daily-quota-panel { padding: 22px; }.quota-heading { flex-wrap: wrap; gap: 12px; }.quota-chances { margin-left: 55px; flex-basis: calc(100% - 55px); }.quota-adjust-row { flex-wrap: wrap; }.quota-heading h2 { font-size: 16px; }.quota-summary > span:last-child { margin-left: 0; } }
-@media (max-width: 570px) { .daily-quota-panel { padding: 19px 17px; margin-bottom: 22px; }.quota-heading h2 { font-size: 14px; }.quota-heading .section-eyebrow { font-size: 7px; }.quota-symbol { width: 35px; height: 35px; }.quota-chances { margin-left: 47px; flex-basis: calc(100% - 47px); font-size: 9px; }.quota-chances strong { font-size: 15px; }.quota-description { font-size: 11px; }.quota-summary { gap: 9px 13px; font-size: 10px; }.quota-summary strong { font-size: 16px; }.quota-summary > span:last-child { flex-basis: 100%; font-size: 9px; }.quota-adjust-row { gap: 13px; }.quota-adjust-row > button { width: 100%; font-size: 10px; }.quota-amount input { font-size: 16px; }.quota-note { font-size: 9px; }.quota-decision-actions { gap: 9px; }.quota-decision-actions > button { width: 100%; font-size: 10px; }.quota-notice { font-size: 10px; }.quota-study-decision { padding: 35px 21px; }.quota-study-decision h2 { font-size: 20px; }.quota-study-decision > p { font-size: 11px; } }
+.daily-quota-panel { margin-bottom: 26px; padding: 25px 27px; border: 1px solid #dbe5cd; border-radius: 16px; background: #f3f7ed; scroll-margin-top: 96px; min-width: 0; }
+.daily-quota-panel[hidden] { display: none; }
+.daily-quota-panel.decision { background: #fcf4e9; border-color: #e8d6bc; }
+.daily-quota-panel .quota-heading { display: flex; align-items: center; gap: 14px; }
+.daily-quota-panel .quota-symbol { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 13px; color: #63884d; background: #e6efda; flex-shrink: 0; }
+.daily-quota-panel.decision .quota-symbol { color: #9b754b; background: #f3e5d0; }
+.daily-quota-panel .quota-heading-copy { flex: 1; min-width: 0; }
+.daily-quota-panel .quota-heading h2 { margin: 5px 0 0; font-size: 18px; font-weight: 600; color: #426239; line-height: 1.6; }
+.daily-quota-panel.decision .quota-heading h2 { color: #805c38; }
+.daily-quota-panel .quota-heading .section-eyebrow { color: #718163; font-size: 12px; line-height: 1.6; letter-spacing: .04em; }
+.daily-quota-panel.decision .quota-heading .section-eyebrow { color: #8d7356; }
+.daily-quota-panel .quota-chances { margin-left: auto; padding: 10px 13px; border: 1px solid #dce6d0; border-radius: 10px; background: #fbfdf7; flex-shrink: 0; }
+.daily-quota-panel .quota-chances > span { display: block; font-size: 12px; color: #748566; line-height: 1.5; }
+.daily-quota-panel .quota-chances > div { display: flex; align-items: baseline; gap: 4px; margin-top: 4px; font-size: 12px; color: #718263; }
+.daily-quota-panel .quota-chances strong { font-size: 23px; line-height: 1.2; font-weight: 600; color: #476d35; font-variant-numeric: tabular-nums; }
+.daily-quota-panel .quota-chance-marks { display: flex; align-self: center; gap: 4px; margin-left: 9px; }
+.daily-quota-panel .quota-chance-marks i { width: 8px; height: 16px; border-radius: 3px; border: 1px solid #b9cba9; }
+.daily-quota-panel .quota-chance-marks .available { background: #739b58; border-color: #739b58; }
+.daily-quota-panel .quota-chance-marks .used { background: #edf1e7; }
+.daily-quota-panel.decision .quota-chances { background: #fffaf2; border-color: #e8d9c4; }
+.daily-quota-panel .quota-description { margin-top: 18px; font-size: 14px; color: #84684a; line-height: 1.85; }
+.daily-quota-panel .quota-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border: 1px solid #dce6d0; border-radius: 12px; background: #fcfdf8; margin: 21px 0 0; padding: 18px 0; }
+.daily-quota-panel .quota-summary > div { min-width: 0; padding: 0 20px; border-left: 1px solid #e3ead8; }
+.daily-quota-panel .quota-summary > div:first-child { border-left: 0; }
+.daily-quota-panel .quota-summary dt { font-size: 13px; line-height: 1.6; color: #728363; }
+.daily-quota-panel .quota-summary dd { margin: 8px 0 0; font-size: 29px; line-height: 1.2; color: #4c6e3d; font-weight: 500; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.daily-quota-panel .quota-summary dd > span { font-size: 12px; color: #7b896f; margin-left: 5px; font-weight: 400; }
+.daily-quota-panel .quota-summary .quota-remaining dd { color: #335b38; }
+.daily-quota-panel .quota-adjust-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-top: 21px; }
+.daily-quota-panel .quota-amount { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; font-size: 14px; line-height: 1.7; color: #536f44; min-width: 0; }
+.daily-quota-panel .quota-amount label { font-weight: 500; }
+.daily-quota-panel .quota-amount input { width: 74px; min-height: 44px; padding: 10px; border-radius: 8px; border: 1px solid #b9cda7; color: #355b30; background: #fffefa; font-size: 16px; text-align: center; }
+.daily-quota-panel .quota-amount input[aria-invalid="true"] { border-color: #bb7c59; background: #fff9f3; }
+.daily-quota-panel .quota-fixed { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.daily-quota-panel .quota-fixed strong { font-weight: 650; color: #3f6532; }
+.daily-quota-panel .quota-preview { flex-basis: 100%; font-size: 13px; line-height: 1.7; color: #718364; margin-top: 1px; }
+.daily-quota-panel .quota-preview strong { color: #456b35; font-weight: 600; }
+.daily-quota-panel .quota-amount:has(input[aria-invalid="true"]) .quota-preview { color: #a0613f; }
+.daily-quota-panel .quota-adjust-row > .button { min-height: 46px; padding: 12px 16px; flex-shrink: 0; font-size: 14px; border-radius: 9px; }
+.daily-quota-panel .quota-decision-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 21px; }
+.daily-quota-panel .quota-decision-actions > .button { min-width: 0; min-height: 85px; gap: 10px; border-radius: 11px; padding: 16px; align-items: center; justify-content: flex-start; text-align: left; white-space: normal; }
+.daily-quota-panel .quota-decision-actions .button > svg { flex-shrink: 0; }
+.daily-quota-panel .quota-decision-actions .button > span { min-width: 0; flex: 1; }
+.daily-quota-panel .quota-decision-actions strong { display: block; font-size: 14px; line-height: 1.6; font-weight: 600; }
+.daily-quota-panel .quota-decision-actions small { display: block; font-size: 12px; line-height: 1.7; margin-top: 5px; font-weight: 400; }
+.daily-quota-panel .quota-decision-actions .primary small { color: #e0ebd5; }
+.daily-quota-panel .quota-decision-actions .outline { background: #fffaf2; color: #88643f; border-color: #ddc7ac; }
+.daily-quota-panel .quota-decision-actions .outline small { color: #917456; }
+.daily-quota-panel .quota-details { display: flex; flex-wrap: wrap; gap: 7px 18px; margin-top: 18px; color: #718463; font-size: 12px; line-height: 1.7; }
+.daily-quota-panel .quota-boost-history { margin: 0; font-size: 12px; color: #5c7e47; }
+.daily-quota-panel .quota-note { color: #718164; font-size: 12px; line-height: 1.85; border-top: 1px solid #dfe8d3; margin-top: 16px; padding-top: 14px; }
+.daily-quota-panel.decision .quota-note { color: #8b7051; border-color: #ebdcc7; }
+.daily-quota-panel .quota-exhausted { display: flex; align-items: flex-start; gap: 9px; margin-top: 20px; padding: 14px 15px; font-size: 14px; line-height: 1.75; color: #527143; background: #eaf1df; border-radius: 10px; }
+.daily-quota-panel .quota-exhausted > svg { margin-top: 4px; flex-shrink: 0; }
+.daily-quota-panel .quota-busy { display: flex; align-items: center; gap: 9px; font-size: 13px; line-height: 1.8; color: #537346; margin-top: 16px; }
+.daily-quota-panel .quota-notice { display: flex; align-items: flex-start; gap: 9px; padding: 14px 15px; margin-top: 16px; border: 1px solid #cbdcbb; border-radius: 10px; background: #e9f1df; font-size: 14px; line-height: 1.8; color: #4a7039; }
+.daily-quota-panel .quota-notice > svg { margin-top: 3px; flex-shrink: 0; }
+.daily-quota-panel .quota-notice > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.daily-quota-panel .quota-dismiss { margin-left: auto; align-self: center; flex-shrink: 0; font-size: 13px; min-height: 44px; color: #456738; padding: 5px 7px; }
+.daily-quota-panel .quota-uncertain { color: #92613e; background: #fff3e6; border: 1px solid #ecd1b6; padding: 13px 15px; border-radius: 10px; font-size: 14px; line-height: 1.8; margin-top: 16px; }
+.daily-quota-panel .quota-refresh-error { background: #fff1e5; border: 1px solid #e8ceb6; border-radius: 10px; padding: 14px 16px; margin-top: 16px; }
+.daily-quota-panel .quota-refresh-error p { color: #91603b; font-size: 14px; line-height: 1.8; }
+.daily-quota-panel .quota-refresh-error .text-button { min-height: 44px; font-size: 13px; margin-top: 7px; color: #8d5a35; }
+.daily-quota-panel .error-notice { margin-top: 15px; font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; }
+.daily-quota-panel .error-notice > svg { flex-shrink: 0; }
+.daily-quota-panel .error-notice button,
+.daily-quota-panel .error-notice a { min-height: 44px; font-size: 13px; }
+.daily-quota-panel button:focus-visible,
+.daily-quota-panel input:focus-visible { outline: 3px solid #789b60; outline-offset: 3px; }
+@media (max-width: 900px) {
+  .daily-quota-panel .quota-heading { flex-wrap: wrap; }
+  .daily-quota-panel .quota-chances { display: flex; align-items: center; gap: 16px; margin-left: 60px; }
+  .daily-quota-panel .quota-chances > div { margin-top: 0; }
+  .daily-quota-panel .quota-adjust-row { flex-wrap: wrap; }
+  .daily-quota-panel .quota-decision-actions { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 570px) {
+  .daily-quota-panel { padding: 20px 17px; margin-bottom: 23px; border-radius: 14px; }
+  .daily-quota-panel .quota-heading { align-items: flex-start; gap: 12px; }
+  .daily-quota-panel .quota-symbol { width: 42px; height: 42px; border-radius: 11px; }
+  .daily-quota-panel .quota-heading h2 { font-size: 17px; margin-top: 6px; }
+  .daily-quota-panel .quota-heading .section-eyebrow { font-size: 12px; }
+  .daily-quota-panel .quota-chances { margin-left: 0; width: 100%; justify-content: space-between; gap: 10px; padding: 11px 13px; }
+  .daily-quota-panel .quota-summary { margin-top: 16px; padding: 15px 0; }
+  .daily-quota-panel .quota-summary > div { padding: 0 10px; }
+  .daily-quota-panel .quota-summary dt { font-size: 12px; }
+  .daily-quota-panel .quota-summary dd { font-size: 27px; margin-top: 8px; }
+  .daily-quota-panel .quota-summary dd > span { margin-left: 3px; }
+  .daily-quota-panel .quota-adjust-row { gap: 15px; padding-top: 18px; }
+  .daily-quota-panel .quota-adjust-row > .button { width: 100%; }
+  .daily-quota-panel .quota-decision-actions { gap: 10px; }
+  .daily-quota-panel .quota-decision-actions > .button { min-height: 82px; padding: 15px; }
+  .daily-quota-panel .quota-description { margin-top: 16px; }
+  .daily-quota-panel .quota-notice { flex-wrap: wrap; padding: 13px; }
+  .daily-quota-panel .quota-dismiss { margin-left: 27px; margin-top: -5px; }
+}

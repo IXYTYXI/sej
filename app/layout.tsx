@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./internal-ui.css";
 import { appPath } from "../lib/paths";
 
 export const metadata: Metadata = {
