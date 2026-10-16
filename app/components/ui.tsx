@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, type RefObject } from "react";
 import { AlertCircle, ArrowUpRight, LoaderCircle, X } from "lucide-react";
 import { Dialog } from "radix-ui";
 import { ApiError } from "./types";
@@ -20,19 +20,28 @@ export function Loading({ text = "正在整理你的学习进度" }: { text?: st
   return <div className="loading-state" role="status"><LoaderCircle className="spin" size={27} /><p>{text}</p><span>每一步，都为记得更久。</span></div>;
 }
 
-export function Modal({ children, title, onClose, busy = false }: {
+export function Modal({ children, title, onClose, busy = false, restoreFocusRef, onCaptureFocus }: {
   children: React.ReactNode; title: string; onClose: () => void; busy?: boolean;
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  onCaptureFocus?: (element: HTMLElement | null) => void;
 }) {
   const dialog = useRef<HTMLDivElement>(null);
   const previous = useRef<HTMLElement | null>(null);
   return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onClose(); }}>
     <Dialog.Portal><Dialog.Overlay className="modal-backdrop">
       <Dialog.Content className="focus-modal" ref={dialog} aria-describedby={undefined}
-        onOpenAutoFocus={event => { event.preventDefault(); previous.current = document.activeElement as HTMLElement | null; dialog.current?.focus(); }}
+        onOpenAutoFocus={event => {
+          event.preventDefault();
+          const focused = document.activeElement as HTMLElement | null;
+          if (!previous.current?.isConnected) previous.current = focused;
+          onCaptureFocus?.(focused);
+          dialog.current?.focus();
+        }}
         onCloseAutoFocus={event => {
           event.preventDefault();
+          const returnFocus = restoreFocusRef ?? previous;
           // Keep an intentional destination focus (for example, the quota panel).
-          if (document.activeElement === document.body || dialog.current?.contains(document.activeElement)) previous.current?.focus();
+          if (document.activeElement === document.body || dialog.current?.contains(document.activeElement)) returnFocus.current?.focus();
         }}
         onInteractOutside={event => event.preventDefault()}
         onEscapeKeyDown={event => { if (busy) event.preventDefault(); }}>

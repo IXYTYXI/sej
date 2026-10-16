@@ -71,12 +71,17 @@ try{
 
  assert.equal(initial.stages.filter(s=>s.unlocked).length,1);
  assert.equal((await api('/api/study?language=en&stageId='+next.id)).status,403);
+ assert.equal((await api('/api/study?language=en&mode=practice&stageId='+next.id)).status,403);
+ for(const mode of ['unknown','','Practice','scheduled%20'])assert.equal((await api('/api/study?language=en&mode='+mode)).status,400);
  assert.equal((await api('/api/exam',{stageId:stage.id})).status,403);
  assert.equal((await api('/api/settings',{dailyNewLimit:0})).status,400);
  assert.equal((await api('/api/settings',{dailyNewLimit:10},{Origin:'https://other.invalid'})).status,403);
  console.log('PASS authentication, origin, validation, initial locks and exam threshold');
  const queue=ok(await api('/api/study?language=en'));
  assert.equal(queue.cards.length,10);assert.equal(new Set(queue.cards.map(c=>c.id)).size,10);
+ assert.equal(queue.mode,'scheduled');
+ assert.deepEqual(queue.availability,{unseenCount:new Set(stage.wordIds).size,learnedCount:0,nextReviewAt:null,challengeStage:null});
+ assert.deepEqual(ok(await api('/api/study?language=en&mode=practice')).cards,[],'Practice cannot introduce unseen vocabulary');
  const first=queue.cards[0];const request={wordId:first.id,rating:4,version:0,requestId:crypto.randomUUID()};
  const reviewed=ok(await api('/api/review',request));assert.equal(reviewed.isMastered,false);
  assert.deepEqual(ok(await api('/api/review',request)),reviewed);
@@ -85,10 +90,20 @@ try{
  const lockedWord=next.wordIds.find(id=>!stage.wordIds.includes(id));
  assert.equal((await api('/api/review',{wordId:lockedWord,rating:4,version:0,requestId:crypto.randomUUID()})).status,403);
  assert.equal(ok(await api('/api/state?language=ja')).stats.todayNew,0);
+ const snapshotLearning=()=>Object.fromEntries(['cards','review_events','daily_quotas','quota_events','passes','unlocks','exams'].map(table=>[table,sqlConnection.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
+ const beforePractice=snapshotLearning();
+ const practice=ok(await api('/api/study?language=en&mode=practice&stageId='+stage.id));
+ assert.equal(practice.mode,'practice');assert.equal(practice.cards.length,1);assert.equal(practice.cards[0].id,first.id);assert.equal(practice.cards[0].isNew,false);
+ assert.deepEqual(practice.availability,{unseenCount:new Set(stage.wordIds).size-1,learnedCount:1,nextReviewAt:reviewed.nextDue,challengeStage:null});
+ assert.deepEqual(ok(await api('/api/study?language=ja&mode=practice')).cards,[]);
+ assert.equal((await api('/api/review',{wordId:first.id,rating:4,version:practice.cards[0].version,requestId:crypto.randomUUID()})).status,409,'Practice must not bypass the scheduled review due time');
+ assert.deepEqual(snapshotLearning(),beforePractice,'Practice reads must preserve learning, quota, mastery and unlock records');
+ console.log('PASS strict study modes, scoped availability, read-only practice and early-review rejection');
  console.log('PASS repeat request idempotency, optimistic concurrency, locked-word write and language isolation');
  // Twenty concurrent new-word requests must not exceed the daily limit of ten.
  await Promise.all(stage.wordIds.filter(id=>id!==first.id).slice(0,20).map(id=>api('/api/review',{wordId:id,rating:3,version:0,requestId:crypto.randomUUID()})));
  assert.equal(ok(await api('/api/state?language=en')).stats.todayNew,10);
+ const exhaustedSchedule=ok(await api('/api/study?language=en'));assert.equal(exhaustedSchedule.newRemaining,0);assert.equal(exhaustedSchedule.availability.unseenCount,new Set(stage.wordIds).size-10);
  console.log('PASS atomic daily new-word quota under concurrency');
 
  // Exercise quota changes only after proving the original ten-word cap above.
@@ -185,7 +200,9 @@ try{
   sql(commands.join('\n'));
  }
  seedMastered(79);assert.equal((await api('/api/exam',{stageId:stage.id})).status,403);
+ assert.equal(ok(await api('/api/study?language=en')).availability.challengeStage,null);
  seedMastered(80);
+ assert.deepEqual(ok(await api('/api/study?language=en')).availability.challengeStage,{id:stage.id,title:stage.title});
  const exam=ok(await api('/api/exam',{stageId:stage.id}));assert.equal(exam.questions.length,20);assert.ok(!('answerKey' in exam));
  assert.equal(ok(await api('/api/exam',{stageId:stage.id})).id,exam.id);
  // Ground truth comes from the local fixture catalog, not from a server-exposed answer key.
@@ -198,6 +215,7 @@ try{
  const passed=ok(await api('/api/exam/submit',{id:exam.id,answers}));assert.equal(passed.passed,true);assert.equal(passed.score,20);assert.ok(passed.unlockedStageIds.includes(next.id));
  assert.deepEqual(ok(await api('/api/exam/submit',{id:exam.id,answers})),passed);
  assert.equal(ok(await api('/api/state?language=en')).stages.find(s=>s.id===next.id).unlocked,true);
+ assert.equal(ok(await api('/api/study?language=en&stageId='+stage.id)).availability.challengeStage,null,'Passed stages are no longer offered as the next challenge');
  console.log('PASS 79/80 percent boundary, private answers, session reuse, scoring and permanent next-stage grant');
  // Later forgetting must reduce mastery without revoking an earned unlock.
  const id=stage.wordIds[0];const p=recordReview(null,words.get(id),1,now,'forget-fixture');

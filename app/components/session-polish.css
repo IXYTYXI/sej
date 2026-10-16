@@ -161,3 +161,25 @@
   .study-content .word-answer { animation: none; }
   .study-content .rating-button:hover:not(:disabled) { transform: none; }
 }
+
+/* Show quota and vocabulary availability separately; neither implies the other. */
+.study-finish .queue-availability { width: 100%; max-width: 460px; margin: 22px auto 0; border: 1px solid #dce6d0; border-radius: 12px; background: #f2f6ec; padding: 4px 17px; text-align: left; }
+.study-finish .queue-availability > div { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 12px 0; font-size: 13px; color: #64765a; }
+.study-finish .queue-availability > div + div { border-top: 1px solid #dfe7d5; }
+.study-finish .queue-availability strong { color: #35593f; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.study-finish .next-review-time { display: flex; align-items: flex-start; justify-content: center; gap: 9px; margin-top: 20px; }
+.study-finish .next-review-time > svg { flex-shrink: 0; margin-top: 5px; }
+.study-finish .next-review-time strong { font-weight: 600; color: #45663c; }
+.study-finish .next-review-time small { display: block; color: #748168; font-size: 12px; margin-top: 3px; }
+.study-finish .queue-refresh-status { min-height: 22px; color: #75836b; font-size: 12px; }
+.study-finish .finish-actions > .text-button { margin: 6px auto 0; min-height: 44px; font-size: 13px; }
+.study-content .practice-session-note { padding: 16px; border: 1px solid #d5e2c9; background: #eef4e6; border-radius: 11px; margin-bottom: 24px; }
+.study-content .practice-session-note > strong { display: block; color: #45683b; font-size: 14px; font-weight: 600; }
+.study-content .practice-session-note > p { color: #63765a; font-size: 13px; line-height: 1.8; margin-top: 6px; }
+.study-content .practice-session-note .text-button { min-height: 44px; margin-top: 5px; font-size: 13px; }
+.study-content .practice-advance > p { text-align: center; color: #718265; font-size: 12px; line-height: 1.8; margin-top: 12px; }
+
+.study-finish .finish-symbol { width: 56px; height: 56px; margin-bottom: 13px; }
+.study-finish .finish-symbol > svg { width: 30px; height: 30px; }
+.study-finish .queue-primary-actions { margin-top: 20px; }
+.study-finish .queue-primary-actions:empty { display: none; }

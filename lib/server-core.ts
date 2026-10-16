@@ -51,16 +51,21 @@ export function createLearningService(db: Database, catalog: Catalog, user: User
     const today=history[history.length-1];const mastered=[...progress.values()].filter(p=>hasMastery(p,now)).length;
     return {user:{name:user.displayName},language,settings:{dailyNewLimit:quota.baseLimit},quota,stats:{mastered,learning:progress.size-mastered,due:[...progress.values()].filter(p=>p.due<=now).length,totalWords:catalog.words.filter(w=>w.language===language).length,todayReviews:today.reviews,todayNew:today.newWords,unlockedStages:stages.filter(s=>s.unlocked).length,totalStages:stages.length},courses:catalog.courses.filter(course=>course.language===language),stages,history,sources:catalog.sources};
   }
-  async function study(language:Language,stageId?:string) {
-    const now=clock();const {progress,grants}=await load(language);const quota=await quotas.current(language,now);
+  async function study(language:Language,stageId?:string,mode:'scheduled'|'practice'='scheduled') {
+    const now=clock();const {progress,grants,passed}=await load(language);const quota=await quotas.current(language,now);
     let stages=catalog.stages.filter(stage=>stage.language===language&&canOpen(stage,grants));
     if(stageId){const stage=stageFor(stageId);if(stage.language!==language)throw new ApiError(400,'阶段与语言不匹配');if(!canOpen(stage,grants))throw new ApiError(403,'请先解锁这个阶段');stages=[stage]}
-    const accessible=[...new Set(stages.flatMap(stage=>stage.wordIds))];
-    const due=accessible.map(id=>progress.get(id)).filter((p):p is Progress=>Boolean(p&&p.due<=now)).sort((a,b)=>a.due-b.due||a.wordId.localeCompare(b.wordId));
+    const accessible=[...new Set(stages.flatMap(stage=>stage.wordIds))].filter(id=>words.get(id)?.language===language);
+    const learned=accessible.map(id=>progress.get(id)).filter((p):p is Progress=>Boolean(p)).sort((a,b)=>a.due-b.due||a.wordId.localeCompare(b.wordId));
+    const due=learned.filter(p=>p.due<=now);
+    const unseen=accessible.filter(id=>!progress.has(id));
+    const nextReview=learned.find(p=>p.due>now);
+    const challengeStage=stages.find(stage=>!passed.has(stage.id)&&canChallenge(stageMastered(stage,progress,now),stage.wordIds.length));
+    const availability={unseenCount:unseen.length,learnedCount:learned.length,nextReviewAt:nextReview?new Date(nextReview.due).toISOString():null,challengeStage:challengeStage?{id:challengeStage.id,title:challengeStage.title}:null};
     const newRemaining=quota.needsDecision?0:Math.max(0,quota.limit-await todayNew(language,now));
-    const selected=due.slice(0,50).map(p=>({id:p.wordId,version:p.version,isNew:false}));
-    for(const id of accessible.filter(id=>!progress.has(id)).slice(0,Math.min(newRemaining,50-selected.length)))selected.push({id,version:0,isNew:true});
-    return {cards:selected.map(item=>({...words.get(item.id)!,version:item.version,isNew:item.isNew})),newRemaining,dueCount:due.length,quota};
+    const selected=(mode==='practice'?learned:due).slice(0,50).map(p=>({id:p.wordId,version:p.version,isNew:false}));
+    if(mode==='scheduled')for(const id of unseen.slice(0,Math.min(newRemaining,50-selected.length)))selected.push({id,version:0,isNew:true});
+    return {mode,cards:selected.map(item=>({...words.get(item.id)!,version:item.version,isNew:item.isNew})),newRemaining,dueCount:due.length,quota,availability};
   }
   async function review(input:unknown):Promise<ReviewResult> {
     const data=object(input,['wordId','rating','version','requestId']);const wordId=identifier(data.wordId);const word=words.get(wordId);

@@ -32,17 +32,23 @@ export default function WordstepsApp({ initialName }: { initialName: string }) {
   const [loggingOut, setLoggingOut] = useState(false);
   const [study, setStudy] = useState<{ stageId?: string; title?: string } | null>(null);
   const [exam, setExam] = useState<Stage | null>(null);
-  const requestNumber = useRef(0);
-  const load = useCallback(async (strict = false) => {
-    const request = ++requestNumber.current;
-    setError(null);
-    try {
-      const result = await api<AppState>(`/api/state?language=${language}`);
-      if (request === requestNumber.current) setState(result);
-    } catch (cause) { if (strict) throw cause; if (request === requestNumber.current) setError(cause); }
-    finally { if (request === requestNumber.current) setLoading(false); }
+  const requests = useRef({ sequence: 0 });
+  const fetchState = useCallback((strict = false) => {
+    const request = ++requests.current.sequence;
+    return api<AppState>(`/api/state?language=${language}`)
+      .then(result => { if (request === requests.current.sequence) { setState(result); setError(null); } })
+      .catch(cause => { if (strict) throw cause; if (request === requests.current.sequence) setError(cause); })
+      .finally(() => { if (request === requests.current.sequence) setLoading(false); });
   }, [language]);
-  useEffect(() => { setLoading(true); setState(null); void load(); return () => { requestNumber.current++; }; }, [load]);
+  const load = useCallback(async (strict = false) => {
+    setError(null);
+    await fetchState(strict);
+  }, [fetchState]);
+  useEffect(() => {
+    const currentRequests = requests.current;
+    void fetchState();
+    return () => { currentRequests.sequence++; };
+  }, [fetchState]);
   const refreshState = useCallback(async () => { await load(true); }, [load]);
   const updateQuota = useCallback(async (quota: DailyQuota) => {
     setState(current => {
@@ -71,7 +77,7 @@ export default function WordstepsApp({ initialName }: { initialName: string }) {
     document.addEventListener("visibilitychange", refreshOnResume);
     return () => { window.clearInterval(timer); window.removeEventListener("focus", refreshOnResume); window.removeEventListener("pageshow", refreshOnResume); document.removeEventListener("visibilitychange", refreshOnResume); };
   }, [load]);
-  const changeLanguage = (next: Language) => { if (next !== language) { setState(null); setLoading(true); setLanguage(next); } };
+  const changeLanguage = (next: Language) => { if (next !== language) { setState(null); setLoading(true); setError(null); setLanguage(next); } };
   const nav = (id: Tab) => { setTab(id); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const openQuota = () => { setStudy(null); setTab("today"); window.setTimeout(() => { const panel = document.getElementById("daily-quota"); panel?.scrollIntoView({ block: "start", behavior: "smooth" }); panel?.focus({ preventScroll: true }); }, 0); };
   const start = (stage?: Stage) => { if (!stage || stage.unlocked) setStudy({ stageId: stage?.id, title: stage?.title }); };
@@ -112,7 +118,7 @@ export default function WordstepsApp({ initialName }: { initialName: string }) {
       </main>
     </div>
     <nav className="mobile-nav" aria-label="移动端主导航">{tabs.map(({ id, short, icon: Icon }) => <button key={id} className={tab === id ? "active" : ""} onClick={() => nav(id)} aria-current={tab === id ? "page" : undefined}><Icon size={21} strokeWidth={1.7} /><span>{short}</span></button>)}</nav>
-    {study && state && <StudySession language={language} stageId={study.stageId} title={study.title} quota={state.quota} todayNew={state.stats.todayNew} onManageQuota={openQuota} onClose={() => { setStudy(null); void load(); }} onChange={refreshState} />}
-    {exam && <ExamSession stage={exam} onClose={() => { setExam(null); void load(); }} onChange={load} />}
+    {study && state && <StudySession key={`${language}:${study.stageId || ""}`} language={language} stageId={study.stageId} title={study.title} quota={state.quota} todayNew={state.stats.todayNew} onManageQuota={openQuota} onLibrary={() => { setStudy(null); nav("library"); }} onExam={stageId => { const stage = state.stages.find(item => item.id === stageId); if (stage) { setStudy(null); setExam(stage); } }} onClose={() => { setStudy(null); void load(); }} onChange={refreshState} />}
+    {exam && <ExamSession key={exam.id} stage={exam} onClose={() => { setExam(null); void load(); }} onChange={load} />}
   </div>;
 }

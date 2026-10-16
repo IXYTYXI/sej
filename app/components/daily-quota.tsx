@@ -78,14 +78,14 @@ export function DailyQuotaPanel({ quota, language, todayNew, hidden = false, onC
       <div className="quota-decision-actions"><button className="button primary" disabled={blocked} onClick={() => void submit("keep")}>{busy ? <LoaderCircle className="spin" size={19} /> : <Check size={19} />}<span><strong>保留 {quota.limit} 个 / 天</strong><small>延续提升后的学习额度</small></span><ArrowRight size={17} /></button><button className="button outline" disabled={blocked} onClick={() => void submit("reset")}><RotateCcw size={19} /><span><strong>重置到基础 {quota.baseLimit} 个 / 天</strong><small>回到基础设置，学习记录保留</small></span></button></div>
       <p className="quota-note">两个选项都不会清空已学单词、掌握记录或复习安排。今天都会重新获得 3 次增加机会；选择前可继续复习，暂不安排新词。</p>
     </> : <>
-      <dl className="quota-summary"><div><dt>今日新词上限</dt><dd>{quota.limit}<span>个</span></dd></div><div><dt>今日已学新词</dt><dd>{todayNew}<span>个</span></dd></div><div className="quota-remaining"><dt>今天还可学</dt><dd>{remaining}<span>个</span></dd></div></dl>
+      <dl className="quota-summary"><div><dt>今日新词上限</dt><dd>{quota.limit}<span>个</span></dd></div><div><dt>今日已学新词</dt><dd>{todayNew}<span>个</span></dd></div><div className="quota-remaining"><dt>剩余新词额度</dt><dd>{remaining}<span>个</span></dd></div></dl>
       {quota.boostsRemaining > 0 ? <div className="quota-adjust-row"><div className="quota-amount">
         {first ? <span className="quota-fixed"><Plus size={18} />第一次固定增加 <strong>10</strong> 个</span> : <><label htmlFor={inputId}>第 {quota.boostsUsed + 1} 次增加</label><input id={inputId} type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={amount} disabled={blocked} aria-invalid={!valid} aria-describedby={`${inputId}-help`} onChange={event => { setAmount(event.target.value); setError(null); pending.current = null; }} /><span>个新词</span></>}
         <span className="quota-preview" id={`${inputId}-help`}>{valid ? <>增加后：<strong>{quota.limit + increment}</strong> 个 / 今天</> : "请输入 1–100 之间的正整数"}</span>
       </div><button className="button primary" type="button" disabled={blocked || !valid} onClick={() => void submit("boost")}>{busy ? <LoaderCircle className="spin" size={16} /> : <Plus size={16} />}增加 {valid ? increment : "新词"} 个额度<ArrowRight size={14} /></button></div>
         : <p className="quota-exhausted"><Check size={16} />今天的 3 次增加机会已用完。明天会重新获得 3 次机会。</p>}
       <div className="quota-details"><span>基础额度 {quota.baseLimit} 个 / 天</span>{quota.boosts.length > 0 && <p className="quota-boost-history">今日已增加：{quota.boosts.map(value => `+${value}`).join("、")} 个</p>}</div>
-      <p className="quota-note">每天可增加 3 次：第一次固定 +10，后两次各增加 1–100 个。英语和日语分别计算；跨天可选择保留额度或重置，学习记录始终保留。</p>
+      <p className="quota-note">每天可增加 3 次：第一次固定 +10，后两次各增加 1–100 个。英语和日语分别计算；跨天可选择保留额度或重置，学习记录始终保留。额度只决定上限，可学新词取决于词库的解锁进度。</p>
     </>}
     {busy && <p className="quota-busy" role="status"><LoaderCircle className="spin" size={16} />正在同步额度，请稍候…</p>}
     {notice && <p className="quota-notice" role="status"><Check size={18} /><span>{notice}</span>{hidden && !busy && !refreshError && !uncertain && <button className="text-button quota-dismiss" onClick={() => { setNotice(""); setError(null); }}>收起</button>}</p>}

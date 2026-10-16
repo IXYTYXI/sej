@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Check, Flag, LoaderCircle, RotateCcw, Sparkles, X } from "lucide-react";
 import { api, type Exam, type ExamResult, type Stage } from "./types";
 import { ErrorNotice, Loading, Modal, ProgressBar } from "./ui";
@@ -17,13 +17,28 @@ export function ExamSession({ stage, onClose, onChange }: { stage: Stage; onClos
   const [error, setError] = useState<unknown>(null);
   const active = useRef(true);
   const inFlight = useRef(false);
-  async function start() {
+  const requests = useRef({ sequence: 0 });
+  const fetchExam = useCallback(() => {
+    const request = ++requests.current.sequence;
+    const isCurrent = () => active.current && request === requests.current.sequence;
+    return api<Exam>("/api/exam", { stageId: stage.id })
+      .then(data => {
+        if (!isCurrent()) return;
+        setExam(data); setIndex(0); setAnswers({}); setSelected(null); setResult(null); setError(null);
+      })
+      .catch(cause => { if (isCurrent()) setError(cause); })
+      .finally(() => { if (isCurrent()) setLoading(false); });
+  }, [stage.id]);
+  function start() {
     setLoading(true); setError(null);
-    try { const data = await api<Exam>("/api/exam", { stageId: stage.id }); if (active.current) { setExam(data); setIndex(0); setAnswers({}); setSelected(null); setResult(null); } }
-    catch (cause) { if (active.current) setError(cause); }
-    finally { if (active.current) setLoading(false); }
+    return fetchExam();
   }
-  useEffect(() => { active.current = true; void start(); return () => { active.current = false; }; }, []); // The dialog is mounted for one stage.
+  useEffect(() => {
+    const currentRequests = requests.current;
+    active.current = true;
+    void fetchExam();
+    return () => { active.current = false; currentRequests.sequence++; };
+  }, [fetchExam]);
   const question = exam?.questions[index];
   async function next() {
     if (!exam || !question || !selected || inFlight.current) return;

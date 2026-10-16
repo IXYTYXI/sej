@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { registerHooks } from 'node:module';
 import { createLearningService } from '../lib/server-core.ts';
 import { createExam, gradeExam } from '../lib/exams.ts';
 import { readBody } from '../lib/server-http.ts';
@@ -13,15 +16,128 @@ const catalog={courses:[],sources:[],words,stages:[
   {id:'en-2',courseId:'en',language:'en',title:'two',index:2,prerequisiteId:'en-1',wordIds:words.slice(20,25).map(w=>w.id)},
   {id:'ja-1',courseId:'ja',language:'ja',title:'日本語',index:1,prerequisiteId:null,wordIds:words.slice(25).map(w=>w.id)},
 ]};
-function setup(hooks = {}) {
+function setup(hooks = {}, testCatalog = catalog) {
   const sql=new DatabaseSync(':memory:');for(const file of ['0000_amazing_old_lace.sql','0003_daily_quota.sql'])sql.exec(readFileSync(new URL(`../drizzle/${file}`,import.meta.url),'utf8'));
   const stmt=(query,values=[])=>({query,values,bind(...args){return stmt(query,args)},async all(){return {results:sql.prepare(query).all(...values)}},async first(){const row=sql.prepare(query).get(...values)??null;await hooks.afterFirst?.(query,row);return row},async run(){const r=sql.prepare(query).run(...values);return {meta:{changes:Number(r.changes)}}}});
   const db={prepare:stmt,async batch(stmts){sql.exec('BEGIN');try{const r=[];for(const s of stmts){const changed=sql.prepare(s.query).run(...s.values);r.push({meta:{changes:Number(changed.changes)}});}sql.exec('COMMIT');return r}catch(e){sql.exec('ROLLBACK');throw e}}};
-  let now=time; const service=createLearningService(db,catalog,{userId:'u1',displayName:'User'},()=>now);
+  let now=time; const service=createLearningService(db,testCatalog,{userId:'u1',displayName:'User'},()=>now);
   function seed(count=16){for(const w of words.slice(0,count)){const data={wordId:w.id,language:w.language,fsrs:{state:2,due:new Date(time),last_review:new Date(time-86400000),stability:20,difficulty:3,elapsed_days:1,scheduled_days:20,reps:4,lapses:0},firstSeen:time-10*86400000,goodDays:['2026-10-01','2026-10-05','2026-10-10'],lastRating:3,version:1,due:time,mastered:true,lastRequest:'seed'};sql.prepare('INSERT INTO cards VALUES (?, ?, ?, ?, ?, ?, ?)').run('u1',w.id,w.language,JSON.stringify(data),1,time,'seed')}}
   return {service,sql,seed,setTime:t=>now=t};
 }
 const review=(wordId,version=0,requestId=crypto.randomUUID())=>({wordId,version,requestId,rating:3});
+
+async function learnedFirstStage() {
+ const stageWords=Array.from({length:105},(_,i)=>({...words[0],id:`en-word-${String(i).padStart(3,'0')}`,word:`word${i}`}));
+ const fixture={...catalog,words:[...stageWords,...words.slice(25)],stages:[
+  {...catalog.stages[0],wordIds:stageWords.slice(0,100).map(w=>w.id)},
+  {...catalog.stages[1],wordIds:stageWords.slice(100).map(w=>w.id)},
+  catalog.stages[2],
+ ]};
+ const context=setup({},fixture);const {service}=context;
+ let quota=(await service.state('en')).quota;
+ for(const amount of [10,100,50])quota=(await service.adjustQuota({language:'en',action:'boost',amount,day:quota.day,version:quota.version,requestId:crypto.randomUUID()})).quota;
+ assert.equal(quota.limit,170);
+ for(const word of stageWords.slice(0,100)){
+  const result=await service.review({...review(word.id),rating:4});
+  assert.equal(result.nextDue,new Date(time+8*86400000).toISOString());
+ }
+ return {...context,stageWords};
+}
+
+function learningSnapshot(sql) {
+ return Object.fromEntries(['cards','review_events','daily_quotas','quota_events','passes','unlocks','exams'].map(table=>[table,sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
+}
+
+test('next-day empty schedule explains the locked-stage gap before and after retaining a 170-word quota',async()=>{
+ const {service,setTime}=await learnedFirstStage();setTime(time+86400000);
+ const pending=await service.study('en');
+ assert.equal(pending.quota.needsDecision,true);assert.equal(pending.quota.limit,170);
+ assert.equal(pending.newRemaining,0);assert.deepEqual(pending.cards,[]);assert.equal(pending.dueCount,0);
+ assert.equal(pending.mode,'scheduled');
+ const availability={unseenCount:0,learnedCount:100,nextReviewAt:new Date(time+8*86400000).toISOString(),challengeStage:null};
+ assert.deepEqual(pending.availability,availability);
+ await service.adjustQuota({language:'en',action:'keep',day:pending.quota.day,version:pending.quota.version,requestId:crypto.randomUUID()});
+ const kept=await service.study('en');assert.equal(kept.newRemaining,170);assert.deepEqual(kept.cards,[]);assert.deepEqual(kept.availability,availability);
+ const state=await service.state('en');assert.equal(state.stages[0].mastered,0);assert.equal(state.stages[1].unlocked,false);
+});
+
+test('practice permits a stable 50-card browse while quota is pending without mutating learning or admitting early reviews',async()=>{
+ const {service,sql,setTime,stageWords}=await learnedFirstStage();setTime(time+86400000);
+ await service.state('en');const before=learningSnapshot(sql);
+ const practice=await service.study('en',undefined,'practice');
+ assert.equal(practice.mode,'practice');assert.equal(practice.quota.needsDecision,true);assert.equal(practice.cards.length,50);
+ assert.deepEqual(practice.cards.map(card=>card.id),stageWords.slice(0,50).map(word=>word.id));
+ assert.ok(practice.cards.every(card=>card.isNew===false&&card.version===1));
+ assert.deepEqual((await service.study('en',undefined,'practice')).cards,practice.cards);
+ await assert.rejects(service.review(review(practice.cards[0].id,1)),{status:409});
+ assert.deepEqual(learningSnapshot(sql),before);
+});
+
+test('quota-exhausted schedule distinguishes unseen words from a fully learned accessible stage',async()=>{
+ const {service}=setup();await service.settings({dailyNewLimit:5});
+ for(const word of words.slice(0,5))await service.review({...review(word.id),rating:4});
+ const scheduled=await service.study('en');assert.deepEqual(scheduled.cards,[]);assert.equal(scheduled.newRemaining,0);
+ assert.deepEqual(scheduled.availability,{unseenCount:15,learnedCount:5,nextReviewAt:new Date(time+8*86400000).toISOString(),challengeStage:null});
+ const fresh=await service.study('ja',undefined,'practice');assert.deepEqual(fresh.cards,[]);
+ assert.deepEqual(fresh.availability,{unseenCount:20,learnedCount:0,nextReviewAt:null,challengeStage:null});
+});
+
+test('availability and practice stay within language and selected unlocked stage, excluding duplicate and invalid words',async()=>{
+ const fixture={...catalog,stages:[{...catalog.stages[0],wordIds:[...catalog.stages[0].wordIds,'w0','missing','w25']},...catalog.stages.slice(1)]};
+ const {service,sql,seed}=setup({},fixture);seed(25);
+ await service.review({...review('w25'),rating:4});
+ const locked=await service.study('en',undefined,'practice');
+ assert.deepEqual(new Set(locked.cards.map(card=>card.id)),new Set(words.slice(0,20).map(word=>word.id)));
+ assert.equal(locked.availability.learnedCount,20);assert.equal(locked.availability.unseenCount,0);assert.equal(locked.availability.nextReviewAt,null);
+ await assert.rejects(service.study('en','en-2','practice'),{status:403});
+ await assert.rejects(service.study('en','ja-1','practice'),{status:400});
+ const japanese=await service.study('ja',undefined,'practice');assert.deepEqual(japanese.cards.map(card=>card.id),['w25']);
+ assert.deepEqual(japanese.availability,{unseenCount:19,learnedCount:1,nextReviewAt:new Date(time+8*86400000).toISOString(),challengeStage:null});
+ sql.prepare('INSERT INTO unlocks VALUES (?,?,?)').run('u1','en-2',time);
+ const selected=await service.study('en','en-2','practice');assert.deepEqual(new Set(selected.cards.map(card=>card.id)),new Set(words.slice(20,25).map(word=>word.id)));
+ assert.deepEqual(selected.availability,{unseenCount:0,learnedCount:5,nextReviewAt:null,challengeStage:{id:'en-2',title:'two'}});
+});
+
+test('availability identifies the next future review and first unpassed exam-ready accessible stage',async()=>{
+ const {service,sql,seed}=setup();seed(25);
+ sql.prepare('INSERT INTO unlocks VALUES (?,?,?)').run('u1','en-2',time);
+ for(const [wordId,due] of [['w0',time+2*86400000],['w1',time+86400000]])sql.prepare("UPDATE cards SET due=?,data=json_set(data,'$.due',?) WHERE word_id=?").run(due,due,wordId);
+ const scheduled=await service.study('en');assert.equal(scheduled.dueCount,23);
+ assert.equal(scheduled.availability.nextReviewAt,new Date(time+86400000).toISOString());
+ assert.deepEqual(scheduled.availability.challengeStage,{id:'en-1',title:'one'});
+ const practice=await service.study('en',undefined,'practice');assert.equal(practice.cards.length,25);assert.equal(practice.cards.at(-2).id,'w1');assert.equal(practice.cards.at(-1).id,'w0');
+ sql.prepare('INSERT INTO passes VALUES (?,?,?)').run('u1','en-1',time);
+ assert.deepEqual((await service.study('en')).availability.challengeStage,{id:'en-2',title:'two'});
+ assert.equal((await service.study('en','en-1')).availability.challengeStage,null);
+ sql.prepare('INSERT INTO passes VALUES (?,?,?)').run('u1','en-2',time);
+ assert.equal((await service.study('en')).availability.challengeStage,null);
+});
+
+test('study HTTP route accepts only explicit scheduled or practice modes and rejects unknown values',async()=>{
+ const directory=mkdtempSync(join(tmpdir(),'wordsteps-study-http-'));const original={...process.env};
+ const {hashPassword}=await import('../lib/auth-password.ts');
+ Object.assign(process.env,{DATABASE_PATH:join(directory,'db.sqlite'),AUTH_USERNAME:'study-test',AUTH_PASSWORD_HASH:await hashPassword('study-password-for-tests'),NODE_ENV:'production',APP_ORIGIN:'https://example.test'});
+ delete process.env.AUTH_PASSWORD_HASH_FILE;
+ // Supply fixture data without importing the catalog's Next-only module guard.
+ const catalogHook=registerHooks({resolve(specifier,context,nextResolve){
+  if(specifier==='./catalog'&&context.parentURL?.endsWith('/lib/server.ts'))return {url:'data:text/javascript,'+encodeURIComponent(`export const catalog = ${JSON.stringify(catalog)};`),shortCircuit:true};
+  return nextResolve(specifier,context);
+ }});
+ try{
+  const login=await import('../app/api/auth/login/route.ts');const study=await import('../app/api/study/route.ts');
+  const response=await login.POST(new Request('https://example.test/api/auth/login',{method:'POST',headers:{origin:'https://example.test','content-type':'application/json'},body:JSON.stringify({username:'study-test',password:'study-password-for-tests'})}));
+  assert.equal(response.status,200);const cookie=response.headers.get('set-cookie').split(';')[0];
+  const get=query=>study.GET(new Request('https://example.test/api/study?language=en'+query,{headers:{cookie}}));
+  for(const mode of ['unknown','','Practice','scheduled%20'])assert.equal((await get('&mode='+mode)).status,400);
+  for(const mode of ['scheduled','practice']){const result=await get('&mode='+mode);assert.equal(result.status,200);assert.equal((await result.json()).mode,mode);}
+  assert.equal((await (await get('')).json()).mode,'scheduled');
+ }finally{
+  catalogHook.deregister();
+  globalThis.wordstepsDatabase?.close();delete globalThis.wordstepsDatabase;
+  for(const name of Object.keys(process.env))if(!(name in original))delete process.env[name];
+  Object.assign(process.env,original);rmSync(directory,{recursive:true,force:true});
+ }
+});
 
 test('exams use opaque unique choice ids, no answer key in questions, and 80% threshold',()=>{
  const exam=createExam(words.slice(0,20),words.slice(0,25));

@@ -29,7 +29,12 @@ export type StudyCard = {
   example?: string; exampleMeaning?: string; tags: string[]; source: string;
   version: number; isNew: boolean;
 };
-export type StudyResponse = { cards: StudyCard[]; newRemaining: number; dueCount: number };
+export type StudyMode = "scheduled" | "practice";
+export type StudyResponse = {
+  cards: StudyCard[]; newRemaining: number; dueCount: number; quota: DailyQuota; mode: StudyMode;
+  availability: { unseenCount: number; learnedCount: number; nextReviewAt: string | null;
+    challengeStage: { id: string; title: string } | null };
+};
 export type Exam = { id: string; questions: { id: string; prompt: string; choices: { id: string; text: string }[] }[]; expiresAt: string };
 export type ExamResult = { score: number; total: number; passed: boolean; unlockedStageIds: string[];
   results: { prompt: string; correct: boolean; answer: string; chosen: string }[] };
