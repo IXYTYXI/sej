@@ -2,7 +2,8 @@ import type {Progress,Stage} from './types';
 import {createEmptyCard,fsrs,type Card,type Grade} from 'ts-fsrs';
 const DAY=86400000;
 const scheduler=fsrs({request_retention:0.9,enable_fuzz:false});
-export function canChallenge(mastered:number,total:number){return total>0&&mastered>=Math.ceil(total*0.8);}
+export function canChallenge(learned:number,total:number){return total>0&&learned>=total;}
+export function hasPassingScore(score:number,total:number){return total>0&&score>=Math.ceil(total*0.8);}
 export function hasMastery(card:Pick<Progress,'firstSeen'|'goodDays'|'lastRating'|'fsrs'|'due'>,now:number){
   return new Set(card.goodDays).size>=3&&now-card.firstSeen>=7*DAY&&card.lastRating>=3&&Number(card.fsrs.scheduled_days)>=7;
 }

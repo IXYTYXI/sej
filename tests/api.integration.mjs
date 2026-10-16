@@ -189,20 +189,29 @@ try{
  console.log('PASS baseline changes preserve daily boost history and the exhausted boost allowance');
 
  const now=Date.now();
- function seedMastered(count){
+ function seedLearned(count){
   const commands=[];
-  for(const id of stage.wordIds.slice(0,count)){
-   const p=recordReview(null,words.get(id),3,now-9*86400000,'fixture');
-   Object.assign(p,{firstSeen:now-9*86400000,goodDays:['2026-01-01','2026-01-04','2026-01-09'],lastRating:3,due:now+86400000,version:1,mastered:true});
-   p.fsrs.scheduled_days=10;
+  for(const [i,id] of stage.wordIds.slice(0,count).entries()){
+   const p=recordReview(null,words.get(id),i%4+1,now,'fixture');
    commands.push(`INSERT INTO cards(user_id,word_id,language,data,version,due,last_request) VALUES (${quote(user)},${quote(id)},'en',${quote(JSON.stringify(p))},1,${p.due},'fixture') ON CONFLICT(user_id,word_id) DO UPDATE SET data=excluded.data,version=1,due=excluded.due,last_request='fixture';`);
   }
   sql(commands.join('\n'));
  }
- seedMastered(79);assert.equal((await api('/api/exam',{stageId:stage.id})).status,403);
+ assert.equal(stage.wordIds.length,100,'The first-stage acceptance fixture must contain 100 words');
+ seedLearned(99);assert.equal((await api('/api/exam',{stageId:stage.id})).status,403);
+ const almostLearned=ok(await api('/api/state?language=en')).stages.find(s=>s.id===stage.id);
+ assert.equal(almostLearned.learned,99);assert.equal(almostLearned.mastered,0);assert.equal(almostLearned.canTest,false);
  assert.equal(ok(await api('/api/study?language=en')).availability.challengeStage,null);
- seedMastered(80);
+ seedLearned(100);
+ const allLearned=ok(await api('/api/state?language=en')).stages.find(s=>s.id===stage.id);
+ assert.equal(allLearned.learned,100);assert.equal(allLearned.mastered,0);assert.equal(allLearned.percent,0);assert.equal(allLearned.canTest,true);
  assert.deepEqual(ok(await api('/api/study?language=en')).availability.challengeStage,{id:stage.id,title:stage.title});
+ const beforeEligiblePractice=snapshotLearning();
+ const eligiblePractice=ok(await api('/api/study?language=en&mode=practice&stageId='+stage.id));
+ assert.equal(eligiblePractice.cards.length,50);assert.ok(eligiblePractice.cards.every(card=>card.isNew===false));
+ assert.deepEqual(eligiblePractice.availability.challengeStage,{id:stage.id,title:stage.title});
+ assert.deepEqual(snapshotLearning(),beforeEligiblePractice,'Practice must preserve learned exam eligibility and all learning records');
+ assert.equal(ok(await api('/api/state?language=en')).stages.find(s=>s.id===stage.id).canTest,true);
  const exam=ok(await api('/api/exam',{stageId:stage.id}));assert.equal(exam.questions.length,20);assert.ok(!('answerKey' in exam));
  assert.equal(ok(await api('/api/exam',{stageId:stage.id})).id,exam.id);
  // Ground truth comes from the local fixture catalog, not from a server-exposed answer key.
@@ -212,17 +221,19 @@ try{
   assert.ok(source,`Unexpected question format: ${q.prompt}`);
   const correct=q.choices.find(c=>c.text===source.meaning);assert.ok(correct,'Exam choices should preserve dictionary meanings');answers[q.id]=correct.id;
  }
- const passed=ok(await api('/api/exam/submit',{id:exam.id,answers}));assert.equal(passed.passed,true);assert.equal(passed.score,20);assert.ok(passed.unlockedStageIds.includes(next.id));
+ for(const q of exam.questions.slice(0,4))answers[q.id]=q.choices.find(choice=>choice.id!==answers[q.id]).id;
+ const passed=ok(await api('/api/exam/submit',{id:exam.id,answers}));assert.equal(passed.passed,true);assert.equal(passed.score,16);assert.ok(passed.unlockedStageIds.includes(next.id));
  assert.deepEqual(ok(await api('/api/exam/submit',{id:exam.id,answers})),passed);
  assert.equal(ok(await api('/api/state?language=en')).stages.find(s=>s.id===next.id).unlocked,true);
  assert.equal(ok(await api('/api/study?language=en&stageId='+stage.id)).availability.challengeStage,null,'Passed stages are no longer offered as the next challenge');
- console.log('PASS 79/80 percent boundary, private answers, session reuse, scoring and permanent next-stage grant');
- // Later forgetting must reduce mastery without revoking an earned unlock.
+ console.log('PASS 99/100 learned boundary, zero mastery on day one, read-only practice, private answers, session reuse, 80 percent score and permanent next-stage grant');
+ // Later forgetting must preserve learned status and the earned unlock.
  const id=stage.wordIds[0];const p=recordReview(null,words.get(id),1,now,'forget-fixture');
  sql(`UPDATE cards SET data=${quote(JSON.stringify(p))},due=${p.due} WHERE user_id=${quote(user)} AND word_id=${quote(id)};`);
- const forgotten=ok(await api('/api/state?language=en'));assert.equal(forgotten.stages.find(s=>s.id===stage.id).mastered,79);assert.equal(forgotten.stages.find(s=>s.id===next.id).unlocked,true);
+ const forgotten=ok(await api('/api/state?language=en'));const forgottenStage=forgotten.stages.find(s=>s.id===stage.id);
+ assert.equal(forgottenStage.mastered,0);assert.equal(forgottenStage.learned,100);assert.equal(forgottenStage.canTest,true);assert.equal(forgotten.stages.find(s=>s.id===next.id).unlocked,true);
  assert.equal((await api('/api/study?language=en&stageId='+next.id)).status,200);
- console.log('PASS forgetting reduces current mastery but keeps earned unlock');
+ console.log('PASS forgetting preserves learned exam eligibility and earned unlock');
  await stop();await start();
  const restored=ok(await api('/api/state?language=en'));assert.equal(restored.stages.find(s=>s.id===next.id).unlocked,true);assert.equal(restored.stats.todayNew,11);
  assert.deepEqual(restored.quota,persistentQuota,'Daily quota must survive a process restart');

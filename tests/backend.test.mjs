@@ -21,13 +21,13 @@ function setup(hooks = {}, testCatalog = catalog) {
   const stmt=(query,values=[])=>({query,values,bind(...args){return stmt(query,args)},async all(){return {results:sql.prepare(query).all(...values)}},async first(){const row=sql.prepare(query).get(...values)??null;await hooks.afterFirst?.(query,row);return row},async run(){const r=sql.prepare(query).run(...values);return {meta:{changes:Number(r.changes)}}}});
   const db={prepare:stmt,async batch(stmts){sql.exec('BEGIN');try{const r=[];for(const s of stmts){const changed=sql.prepare(s.query).run(...s.values);r.push({meta:{changes:Number(changed.changes)}});}sql.exec('COMMIT');return r}catch(e){sql.exec('ROLLBACK');throw e}}};
   let now=time; const service=createLearningService(db,testCatalog,{userId:'u1',displayName:'User'},()=>now);
-  function seed(count=16){for(const w of words.slice(0,count)){const data={wordId:w.id,language:w.language,fsrs:{state:2,due:new Date(time),last_review:new Date(time-86400000),stability:20,difficulty:3,elapsed_days:1,scheduled_days:20,reps:4,lapses:0},firstSeen:time-10*86400000,goodDays:['2026-10-01','2026-10-05','2026-10-10'],lastRating:3,version:1,due:time,mastered:true,lastRequest:'seed'};sql.prepare('INSERT INTO cards VALUES (?, ?, ?, ?, ?, ?, ?)').run('u1',w.id,w.language,JSON.stringify(data),1,time,'seed')}}
-  return {service,sql,seed,setTime:t=>now=t};
+  function seed(count=20){for(const w of words.slice(0,count)){const data={wordId:w.id,language:w.language,fsrs:{state:2,due:new Date(time),last_review:new Date(time-86400000),stability:20,difficulty:3,elapsed_days:1,scheduled_days:20,reps:4,lapses:0},firstSeen:time-10*86400000,goodDays:['2026-10-01','2026-10-05','2026-10-10'],lastRating:3,version:1,due:time,mastered:true,lastRequest:'seed'};sql.prepare('INSERT INTO cards VALUES (?, ?, ?, ?, ?, ?, ?)').run('u1',w.id,w.language,JSON.stringify(data),1,time,'seed')}}
+  return {service,sql,db,seed,setTime:t=>now=t};
 }
 const review=(wordId,version=0,requestId=crypto.randomUUID())=>({wordId,version,requestId,rating:3});
 
-async function learnedFirstStage() {
- const stageWords=Array.from({length:105},(_,i)=>({...words[0],id:`en-word-${String(i).padStart(3,'0')}`,word:`word${i}`}));
+async function learnedFirstStage(count=100) {
+ const stageWords=Array.from({length:105},(_,i)=>({...words[0],id:`en-word-${String(i).padStart(3,'0')}`,word:`word${i}`,meaning:`释义${i}`}));
  const fixture={...catalog,words:[...stageWords,...words.slice(25)],stages:[
   {...catalog.stages[0],wordIds:stageWords.slice(0,100).map(w=>w.id)},
   {...catalog.stages[1],wordIds:stageWords.slice(100).map(w=>w.id)},
@@ -37,7 +37,7 @@ async function learnedFirstStage() {
  let quota=(await service.state('en')).quota;
  for(const amount of [10,100,50])quota=(await service.adjustQuota({language:'en',action:'boost',amount,day:quota.day,version:quota.version,requestId:crypto.randomUUID()})).quota;
  assert.equal(quota.limit,170);
- for(const word of stageWords.slice(0,100)){
+ for(const word of stageWords.slice(0,count)){
   const result=await service.review({...review(word.id),rating:4});
   assert.equal(result.nextDue,new Date(time+8*86400000).toISOString());
  }
@@ -48,17 +48,82 @@ function learningSnapshot(sql) {
  return Object.fromEntries(['cards','review_events','daily_quotas','quota_events','passes','unlocks','exams'].map(table=>[table,sql.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
 }
 
-test('next-day empty schedule explains the locked-stage gap before and after retaining a 170-word quota',async()=>{
+test('99 of 100 learned words cannot take an exam; learning the last word permits it on day one with zero mastery',async()=>{
+ const {service,stageWords}=await learnedFirstStage(99);
+ let stage=(await service.state('en')).stages[0];
+ assert.equal(stage.learned,99);assert.equal(stage.mastered,0);assert.equal(stage.canTest,false);
+ assert.equal((await service.study('en')).availability.challengeStage,null);
+ await assert.rejects(service.startExam({stageId:'en-1'}),{status:403});
+ await service.review({...review(stageWords[99].id),rating:1});
+ stage=(await service.state('en')).stages[0];
+ assert.equal(stage.learned,100);assert.equal(stage.mastered,0);assert.equal(stage.percent,0);assert.equal(stage.canTest,true);
+ for(const mode of ['scheduled','practice'])assert.deepEqual((await service.study('en','en-1',mode)).availability.challengeStage,{id:'en-1',title:'one'});
+ const exam=await service.startExam({stageId:'en-1'});assert.equal(exam.questions.length,20);
+ assert.equal((await service.startExam({stageId:'en-1'})).id,exam.id);
+});
+
+test('forgotten and difficult first ratings still count as learned without changing mastery',async()=>{
+ const {service}=setup();await service.settings({dailyNewLimit:20});
+ for(const [i,word] of words.slice(0,20).entries())await service.review({...review(word.id),rating:i%2+1});
+ const state=await service.state('en');assert.equal(state.stages[0].learned,20);assert.equal(state.stages[0].mastered,0);assert.equal(state.stages[0].canTest,true);
+ assert.equal(state.stats.mastered,0);assert.equal(state.stats.learning,20);
+ assert.equal((await service.startExam({stageId:'en-1'})).questions.length,20);
+});
+
+test('80 percent mastery does not admit a stage with unlearned words and empty stages never offer exams',async()=>{
+ const {service,seed}=setup();seed(16);
+ const stage=(await service.state('en')).stages[0];assert.equal(stage.mastered,16);assert.equal(stage.percent,80);assert.equal(stage.learned,16);assert.equal(stage.canTest,false);
+ assert.equal((await service.study('en')).availability.challengeStage,null);
+ await assert.rejects(service.startExam({stageId:'en-1'}),{status:403});
+ const empty=setup({},{...catalog,stages:[{...catalog.stages[0],wordIds:[]}]}).service;
+ assert.equal((await empty.state('en')).stages[0].canTest,false);assert.equal((await empty.study('en')).availability.challengeStage,null);
+ await assert.rejects(empty.startExam({stageId:'en-1'}),{status:403});
+});
+
+test('learning eligibility stays scoped to the user, language and unlocked stage',async()=>{
+ const {service,db,sql,seed}=setup();seed(25);
+ const state=await service.state('en');assert.equal(state.stages[0].canTest,true);assert.equal(state.stages[1].learned,5);assert.equal(state.stages[1].canTest,false);
+ await assert.rejects(service.startExam({stageId:'en-2'}),{status:403});
+ assert.equal((await service.state('ja')).stages[0].learned,0);assert.equal((await service.study('ja')).availability.challengeStage,null);
+ await assert.rejects(service.startExam({stageId:'ja-1'}),{status:403});
+ const other=createLearningService(db,catalog,{userId:'u2',displayName:'Other'},()=>time);
+ assert.equal((await other.state('en')).stages[0].learned,0);assert.equal((await other.study('en')).availability.challengeStage,null);
+ await assert.rejects(other.startExam({stageId:'en-1'}),{status:403});
+ const exam=await service.startExam({stageId:'en-1'});const stored=JSON.parse(sql.prepare('SELECT data FROM exams WHERE id=?').get(exam.id).data);
+ await assert.rejects(other.submitExam({id:exam.id,answers:stored.answerKey}),{status:404});
+});
+
+test('exam insertion atomically rechecks every learned word with user and language scope',async()=>{
+ for(const change of ["DELETE FROM cards WHERE word_id='w0'","UPDATE cards SET user_id='u2' WHERE word_id='w0'","UPDATE cards SET language='ja' WHERE word_id='w0'"]){
+  let changed=false;
+  const {service,sql,seed}=setup({afterFirst:query=>{if(!changed&&query.startsWith('SELECT id,stage_id,data,expires_at,result FROM exams WHERE user_id=')){changed=true;sql.exec(change)}}});
+  seed();await assert.rejects(service.startExam({stageId:'en-1'}),{status:409});
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM exams').get().n,0);
+ }
+});
+
+test('exam submission atomically requires all learned words to retain their user and language scope',async()=>{
+ for(const change of ["DELETE FROM cards WHERE word_id='w0'","UPDATE cards SET user_id='u2' WHERE word_id='w0'","UPDATE cards SET language='ja' WHERE word_id='w0'"]){
+  let submitting=false;
+  const {service,sql,seed}=setup({afterFirst:query=>{if(submitting&&query.startsWith('SELECT id,stage_id,data,expires_at,result FROM exams WHERE id=')){submitting=false;sql.exec(change)}}});
+  seed();const exam=await service.startExam({stageId:'en-1'});const stored=JSON.parse(sql.prepare('SELECT data FROM exams WHERE id=?').get(exam.id).data);
+  submitting=true;const result=await service.submitExam({id:exam.id,answers:stored.answerKey});
+  assert.equal(result.score,20);assert.equal(result.passed,false);assert.deepEqual(result.unlockedStageIds,[]);
+  assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM passes').get().n,0);assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM unlocks').get().n,0);
+ }
+});
+
+test('next-day empty schedule offers an exam after all words are learned even while quota needs a decision',async()=>{
  const {service,setTime}=await learnedFirstStage();setTime(time+86400000);
  const pending=await service.study('en');
  assert.equal(pending.quota.needsDecision,true);assert.equal(pending.quota.limit,170);
  assert.equal(pending.newRemaining,0);assert.deepEqual(pending.cards,[]);assert.equal(pending.dueCount,0);
  assert.equal(pending.mode,'scheduled');
- const availability={unseenCount:0,learnedCount:100,nextReviewAt:new Date(time+8*86400000).toISOString(),challengeStage:null};
+ const availability={unseenCount:0,learnedCount:100,nextReviewAt:new Date(time+8*86400000).toISOString(),challengeStage:{id:'en-1',title:'one'}};
  assert.deepEqual(pending.availability,availability);
  await service.adjustQuota({language:'en',action:'keep',day:pending.quota.day,version:pending.quota.version,requestId:crypto.randomUUID()});
  const kept=await service.study('en');assert.equal(kept.newRemaining,170);assert.deepEqual(kept.cards,[]);assert.deepEqual(kept.availability,availability);
- const state=await service.state('en');assert.equal(state.stages[0].mastered,0);assert.equal(state.stages[1].unlocked,false);
+ const state=await service.state('en');assert.equal(state.stages[0].mastered,0);assert.equal(state.stages[0].canTest,true);assert.equal(state.stages[1].unlocked,false);
 });
 
 test('practice permits a stable 50-card browse while quota is pending without mutating learning or admitting early reviews',async()=>{
@@ -69,6 +134,8 @@ test('practice permits a stable 50-card browse while quota is pending without mu
  assert.deepEqual(practice.cards.map(card=>card.id),stageWords.slice(0,50).map(word=>word.id));
  assert.ok(practice.cards.every(card=>card.isNew===false&&card.version===1));
  assert.deepEqual((await service.study('en',undefined,'practice')).cards,practice.cards);
+ assert.deepEqual(practice.availability.challengeStage,{id:'en-1',title:'one'});
+ assert.equal((await service.state('en')).stages[0].canTest,true);
  await assert.rejects(service.review(review(practice.cards[0].id,1)),{status:409});
  assert.deepEqual(learningSnapshot(sql),before);
 });
@@ -165,7 +232,7 @@ test('locked word reviews are rejected and per-language new word quota is enforc
  assert.equal((await service.study('ja')).cards.length,5);await service.review(review('w25'));
  assert.equal((await service.state('en')).stats.todayNew,5);assert.equal((await service.state('ja')).stats.todayNew,1);
 });
-test('exam requires current mastery, reuses active attempt, and permanently unlocks next stage',async()=>{
+test('exam requires all words learned, reuses active attempt, and permanently unlocks next stage',async()=>{
  const {service,sql,seed}=setup();await assert.rejects(service.startExam({stageId:'en-1'}),{status:403});seed();
  const exam=await service.startExam({stageId:'en-1'});assert.equal((await service.startExam({stageId:'en-1'})).id,exam.id);assert.equal('answerKey' in exam,false);
  const stored=JSON.parse(sql.prepare('SELECT data FROM exams WHERE id=?').get(exam.id).data);
@@ -173,12 +240,24 @@ test('exam requires current mastery, reuses active attempt, and permanently unlo
  const result=await service.submitExam({id:exam.id,answers});assert.equal(result.passed,true);assert.deepEqual(result.unlockedStageIds,['en-2']);
  assert.deepEqual(await service.submitExam({id:exam.id,answers:{}}),result);
  sql.prepare("UPDATE cards SET data=json_set(data,'$.mastered',json('false'),'$.lastRating',1)").run();
- assert.equal((await service.state('en')).stages[1].unlocked,true);
+ const forgotten=await service.state('en');assert.equal(forgotten.stages[0].mastered,0);assert.equal(forgotten.stages[0].canTest,true);assert.equal(forgotten.stages[1].unlocked,true);
+ assert.equal((await service.study('en','en-1')).availability.challengeStage,null);
 });
-test('mastery loss before submission prevents unlock even with perfect exam answers',async()=>{
+test('forgetting before submission preserves learned status and perfect exam answers still unlock the next stage',async()=>{
  const {service,sql,seed}=setup();seed();const exam=await service.startExam({stageId:'en-1'});const stored=JSON.parse(sql.prepare('SELECT data FROM exams WHERE id=?').get(exam.id).data);
  sql.prepare("UPDATE cards SET data=json_set(data,'$.mastered',json('false'),'$.lastRating',1)").run();
- const result=await service.submitExam({id:exam.id,answers:stored.answerKey});assert.equal(result.score,20);assert.equal(result.passed,false);assert.deepEqual(result.unlockedStageIds,[]);
+ const result=await service.submitExam({id:exam.id,answers:stored.answerKey});assert.equal(result.score,20);assert.equal(result.passed,true);assert.deepEqual(result.unlockedStageIds,['en-2']);
+ const state=await service.state('en');assert.equal(state.stages[0].mastered,0);assert.equal(state.stages[0].learned,20);assert.equal(state.stages[1].unlocked,true);
+});
+test('learning every word still requires an 80 percent exam score to unlock the next stage',async()=>{
+ for(const score of [15,16]){
+  const {service,sql}=setup();await service.settings({dailyNewLimit:20});
+  for(const word of words.slice(0,20))await service.review({...review(word.id),rating:1});
+  const exam=await service.startExam({stageId:'en-1'});const stored=JSON.parse(sql.prepare('SELECT data FROM exams WHERE id=?').get(exam.id).data);
+  const answers={...stored.answerKey};for(const q of stored.questions.slice(score))answers[q.id]=q.choices.find(choice=>choice.id!==stored.answerKey[q.id]).id;
+  const result=await service.submitExam({id:exam.id,answers});assert.equal(result.score,score);assert.equal(result.passed,score===16);
+  assert.deepEqual(result.unlockedStageIds,score===16?['en-2']:[]);assert.equal((await service.state('en')).stages[1].unlocked,score===16);
+ }
 });
 test('exam expires and does not accept answers after 30 minutes',async()=>{
  const {service,seed,setTime}=setup();seed();const exam=await service.startExam({stageId:'en-1'});setTime(time+31*60000);await assert.rejects(service.submitExam({id:exam.id,answers:{}}),{status:409});

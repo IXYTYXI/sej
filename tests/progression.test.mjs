@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {hasMastery,canChallenge,canOpen,dayKey,recordReview} from '../lib/progression.ts';
+import * as progression from '../lib/progression.ts';
 const now=Date.parse('2026-10-10T09:00:00Z');
 const card={firstSeen:now-8*86400000,goodDays:['2026-10-02','2026-10-05','2026-10-10'],lastRating:3,fsrs:{scheduled_days:10},due:now+10*86400000};
-test('80 percent is inclusive and empty stages never qualify',()=>{assert.equal(canChallenge(79,100),false);assert.equal(canChallenge(80,100),true);assert.equal(canChallenge(0,0),false);assert.equal(canChallenge(4,5),true)});
+test('exam admission requires every word learned and empty stages never qualify',()=>{assert.equal(canChallenge(79,100),false);assert.equal(canChallenge(80,100),false);assert.equal(canChallenge(99,100),false);assert.equal(canChallenge(100,100),true);assert.equal(canChallenge(0,0),false);assert.equal(canChallenge(4,5),false);assert.equal(canChallenge(5,5),true)});
+test('exam score passing remains inclusive at 80 percent independently of admission',()=>{assert.equal(typeof progression.hasPassingScore,'function');assert.equal(progression.hasPassingScore(79,100),false);assert.equal(progression.hasPassingScore(80,100),true);assert.equal(progression.hasPassingScore(0,0),false);assert.equal(progression.hasPassingScore(4,5),true);assert.equal(progression.hasPassingScore(2,3),false);assert.equal(progression.hasPassingScore(3,3),true)});
 test('mastery requires distinct spaced days, a week, good recall and a long interval',()=>{assert.equal(hasMastery(card,now),true);assert.equal(hasMastery({...card,goodDays:['2026-10-10','2026-10-10','2026-10-10']},now),false);assert.equal(hasMastery({...card,firstSeen:now-86400000},now),false);assert.equal(hasMastery({...card,lastRating:1},now),false);assert.equal(hasMastery({...card,fsrs:{scheduled_days:1}},now),false)});
 test('stage access remains locked without a grant and grants are permanent',()=>{assert.equal(canOpen({id:'ja-1',prerequisiteId:null},new Set()),true);assert.equal(canOpen({id:'en-2',prerequisiteId:'en-1'},new Set()),false);assert.equal(canOpen({id:'en-2',prerequisiteId:'en-1'},new Set(['en-2'])),true)});
 test('day boundary uses Shanghai time',()=>assert.equal(dayKey(Date.parse('2026-10-09T17:00:00Z')),'2026-10-10'));

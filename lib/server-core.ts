@@ -1,5 +1,5 @@
 import type { Catalog, Language, Progress, Stage } from './types';
-import { canChallenge, canOpen, dayKey, dayStart, hasMastery, recordReview } from './progression';
+import { canChallenge, canOpen, dayKey, dayStart, hasMastery, hasPassingScore, recordReview } from './progression';
 import { createExam, gradeExam, type ExamData } from './exams';
 import { ApiError, identifier, object } from './server-http';
 import type { Database } from './database';
@@ -10,11 +10,7 @@ type CardRow = {data:string};
 type ExamRow = {id:string;stage_id:string;data:string;expires_at:number;result:string|null};
 type ReviewResult = {nextDue:string;isMastered:boolean};
 type ReviewReceipt = {response:ReviewResult;rating:number;version:number};
-const masterySQL = `json_extract(c.data, '$.lastRating') >= 3
- AND json_extract(c.data, '$.fsrs.scheduled_days') >= 7
- AND ? - json_extract(c.data, '$.firstSeen') >= 604800000
- AND (SELECT COUNT(DISTINCT value) FROM json_each(c.data, '$.goodDays')) >= 3`;
-const countMasterySQL = `(SELECT COUNT(*) FROM cards c JOIN json_each(?) w ON c.word_id = w.value WHERE c.user_id = ? AND ${masterySQL})`;
+const countLearnedSQL = `(SELECT COUNT(*) FROM cards c JOIN json_each(?) w ON c.word_id = w.value WHERE c.user_id = ? AND c.language = ?)`;
 
 export function createLearningService(db: Database, catalog: Catalog, user: User, clock: ()=>number = Date.now) {
   const words = new Map(catalog.words.map(word=>[word.id,word]));
@@ -39,11 +35,14 @@ export function createLearningService(db: Database, catalog: Catalog, user: User
   function stageMastered(stage:Stage,progress:Map<string,Progress>,now:number) {
     return stage.wordIds.filter(id=>{const card=progress.get(id);return card&&hasMastery(card,now)}).length;
   }
+  function stageLearned(stage:Stage,progress:Map<string,Progress>) {
+    return stage.wordIds.filter(id=>progress.has(id)).length;
+  }
   async function state(language:Language) {
     const now=clock(); const {progress,grants,passed}=await load(language);const quota=await quotas.current(language,now);
     const stages=catalog.stages.filter(stage=>stage.language===language).map(stage=>{
-      const mastered=stageMastered(stage,progress,now); const total=stage.wordIds.length;const unlocked=canOpen(stage,grants);
-      return {id:stage.id,courseId:stage.courseId,language:stage.language,title:stage.title,index:stage.index,prerequisiteId:stage.prerequisiteId,total,mastered,learned:stage.wordIds.filter(id=>progress.has(id)).length,percent:total?Math.floor(mastered/total*100):0,unlocked,passed:passed.has(stage.id),canTest:unlocked&&canChallenge(mastered,total)};
+      const mastered=stageMastered(stage,progress,now);const learned=stageLearned(stage,progress);const total=stage.wordIds.length;const unlocked=canOpen(stage,grants);
+      return {id:stage.id,courseId:stage.courseId,language:stage.language,title:stage.title,index:stage.index,prerequisiteId:stage.prerequisiteId,total,mastered,learned,percent:total?Math.floor(mastered/total*100):0,unlocked,passed:passed.has(stage.id),canTest:unlocked&&canChallenge(learned,total)};
     });
     const historyRows=await prepare("SELECT strftime('%Y-%m-%d', created_at / 1000, 'unixepoch', '+8 hours') AS date, COUNT(*) AS reviews, SUM(new_word) AS newWords FROM review_events WHERE user_id=? AND language=? AND created_at>=? AND created_at<? GROUP BY date",user.userId,language,dayStart(now)-13*86400000,dayStart(now)+86400000).all<{date:string;reviews:number;newWords:number}>();
     const historyMap=new Map(historyRows.results.map(row=>[row.date,row]));
@@ -60,7 +59,7 @@ export function createLearningService(db: Database, catalog: Catalog, user: User
     const due=learned.filter(p=>p.due<=now);
     const unseen=accessible.filter(id=>!progress.has(id));
     const nextReview=learned.find(p=>p.due>now);
-    const challengeStage=stages.find(stage=>!passed.has(stage.id)&&canChallenge(stageMastered(stage,progress,now),stage.wordIds.length));
+    const challengeStage=stages.find(stage=>!passed.has(stage.id)&&canChallenge(stageLearned(stage,progress),stage.wordIds.length));
     const availability={unseenCount:unseen.length,learnedCount:learned.length,nextReviewAt:nextReview?new Date(nextReview.due).toISOString():null,challengeStage:challengeStage?{id:challengeStage.id,title:challengeStage.title}:null};
     const newRemaining=quota.needsDecision?0:Math.max(0,quota.limit-await todayNew(language,now));
     const selected=(mode==='practice'?learned:due).slice(0,50).map(p=>({id:p.wordId,version:p.version,isNew:false}));
@@ -111,15 +110,15 @@ export function createLearningService(db: Database, catalog: Catalog, user: User
   }
   async function startExam(input:unknown) {
     const {stageId}=object(input,['stageId']);const stage=stageFor(stageId);const now=clock();const {progress,grants}=await load(stage.language);
-    if(!canOpen(stage,grants)||!canChallenge(stageMastered(stage,progress,now),stage.wordIds.length))throw new ApiError(403,'阶段解锁且掌握率达到 80% 后才能考试');
+    if(!canOpen(stage,grants)||!canChallenge(stageLearned(stage,progress),stage.wordIds.length))throw new ApiError(403,'阶段解锁且全部单词已学后才能考试');
     const active=()=>prepare('SELECT id,stage_id,data,expires_at,result FROM exams WHERE user_id=? AND stage_id=? AND result IS NULL AND expires_at>? ORDER BY created_at,id LIMIT 1',user.userId,stage.id,now).first<ExamRow>();
     let exam=await active();
     if(!exam){
       const accessibleIds=new Set(catalog.stages.filter(candidate=>candidate.language===stage.language&&canOpen(candidate,grants)).flatMap(candidate=>candidate.wordIds));
       const generated=createExam(stage.wordIds.map(id=>words.get(id)!),catalog.words.filter(word=>accessibleIds.has(word.id)));
       const id=crypto.randomUUID();
-      await prepare(`INSERT INTO exams (id,user_id,stage_id,data,created_at,expires_at) SELECT ?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM exams WHERE user_id=? AND stage_id=? AND result IS NULL AND expires_at>?) AND ${countMasterySQL} >= ?`,id,user.userId,stage.id,JSON.stringify(generated),now,now+30*60000,user.userId,stage.id,now,JSON.stringify(stage.wordIds),user.userId,now,Math.ceil(stage.wordIds.length*.8)).run();
-      exam=await active();if(!exam)throw new ApiError(409,'掌握状态已更新，请刷新后再考试');
+      await prepare(`INSERT INTO exams (id,user_id,stage_id,data,created_at,expires_at) SELECT ?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM exams WHERE user_id=? AND stage_id=? AND result IS NULL AND expires_at>?) AND ${countLearnedSQL} >= ?`,id,user.userId,stage.id,JSON.stringify(generated),now,now+30*60000,user.userId,stage.id,now,JSON.stringify(stage.wordIds),user.userId,stage.language,stage.wordIds.length).run();
+      exam=await active();if(!exam)throw new ApiError(409,'已学进度已更新，请刷新后再考试');
     }
     return {id:exam.id,questions:(JSON.parse(exam.data) as ExamData).questions,expiresAt:new Date(exam.expires_at).toISOString()};
   }
@@ -130,10 +129,10 @@ export function createLearningService(db: Database, catalog: Catalog, user: User
     if(row.expires_at<=now)throw new ApiError(409,'试卷已过期，请重新开始');
     const stage=stageFor(row.stage_id);const graded=gradeExam(JSON.parse(row.data) as ExamData,data.answers);
     const children=catalog.stages.filter(candidate=>candidate.prerequisiteId===stage.id).map(candidate=>candidate.id);
-    const eligible=canChallenge(graded.score,graded.total)?1:0;
+    const eligible=hasPassingScore(graded.score,graded.total)?1:0;
     const base=JSON.stringify({...graded,passed:false,unlockedStageIds:[]});
-    const batch=[prepare(`WITH qualified AS (SELECT CASE WHEN ?=1 AND ${countMasterySQL}>=? THEN 1 ELSE 0 END AS ok)
- UPDATE exams SET result=(SELECT json_set(?, '$.passed', json(CASE WHEN ok=1 THEN 'true' ELSE 'false' END), '$.unlockedStageIds', json(CASE WHEN ok=1 THEN ? ELSE '[]' END)) FROM qualified) WHERE id=? AND user_id=? AND result IS NULL AND expires_at>?`,eligible,JSON.stringify(stage.wordIds),user.userId,now,Math.ceil(stage.wordIds.length*.8),base,JSON.stringify(children),id,user.userId,now),
+    const batch=[prepare(`WITH qualified AS (SELECT CASE WHEN ?=1 AND ${countLearnedSQL}>=? THEN 1 ELSE 0 END AS ok)
+ UPDATE exams SET result=(SELECT json_set(?, '$.passed', json(CASE WHEN ok=1 THEN 'true' ELSE 'false' END), '$.unlockedStageIds', json(CASE WHEN ok=1 THEN ? ELSE '[]' END)) FROM qualified) WHERE id=? AND user_id=? AND result IS NULL AND expires_at>?`,eligible,JSON.stringify(stage.wordIds),user.userId,stage.language,stage.wordIds.length,base,JSON.stringify(children),id,user.userId,now),
       prepare(`INSERT INTO passes (user_id,stage_id,created_at) SELECT ?,?,? WHERE EXISTS (SELECT 1 FROM exams WHERE id=? AND user_id=? AND json_extract(result,'$.passed')=1) ON CONFLICT(user_id,stage_id) DO NOTHING`,user.userId,stage.id,now,id,user.userId),
       ...children.map(child=>prepare(`INSERT INTO unlocks (user_id,stage_id,created_at) SELECT ?,?,? WHERE EXISTS (SELECT 1 FROM exams WHERE id=? AND user_id=? AND json_extract(result,'$.passed')=1) ON CONFLICT(user_id,stage_id) DO NOTHING`,user.userId,child,now,id,user.userId)),
     ];

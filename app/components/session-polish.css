@@ -110,6 +110,14 @@
 .session-results .exam-score-label { display: block; font-size: 13px; color: #6b805a; line-height: 1.6; }
 .session-results .exam-score { font-size: 52px; line-height: 1.2; margin-top: 8px; color: #456a35; font-variant-numeric: tabular-nums; }
 .session-results .exam-score > span { font-size: 19px; color: #77886a; }
+.session-results .exam-pass-rule { font-size: 12px; line-height: 1.8; color: #63765a; margin-top: 10px; }
+.session-results .exam-result-actions { margin-top: 25px; gap: 10px; }
+.session-results .exam-result-actions .button { min-height: 46px; width: 100%; max-width: 360px; margin-inline: auto; padding: 12px 18px; font-size: 14px; }
+.study-finish > p,
+.session-results > p,
+.exam-content .exam-prompt { overflow-wrap: anywhere; }
+.exam-content .exam-prompt:focus-visible,
+.session-results h2:focus-visible { outline: 3px solid #789b60; outline-offset: 5px; border-radius: 4px; }
 .session-results .answer-review { margin-top: 30px; padding-top: 23px; }
 .session-results .answer-review-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .session-results .answer-review-heading h3 { font-size: 16px; color: #3e6137; font-weight: 600; }
