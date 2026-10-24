@@ -20,7 +20,7 @@ test('production auth routes set a scoped secure session and logout revokes it w
     assert.equal(await getRequestUser(new Request('https://xairlab.com/study/api/state', { headers: { 'oai-authenticated-user-id': 'owner', 'oai-authenticated-user-email': 'forged@example.test' } })), null);
     const response = await login.POST(request('login', { username: 'yc', password: 'test-password-not-for-production' }));
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { user: { userId: 'owner', displayName: 'yc' } });
+    assert.deepEqual(await response.json(), { user: { userId: 'owner', displayName: 'yc', role: 'admin' } });
     const setCookie = response.headers.get('set-cookie');
     assert.match(setCookie, /Path=\/study;/); assert.match(setCookie, /Secure/); assert.match(setCookie, /HttpOnly/);
     const cookie = setCookie.split(';')[0];

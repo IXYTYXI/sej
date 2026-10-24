@@ -41,6 +41,21 @@ curl --fail http://127.0.0.1:3100/study/api/health
 
 最后检查 HTTPS 下登录、背词、AI 报告以及主站原有页面。远程未成功执行这些步骤前，不应声称已部署。
 
+## 新增独立管理员
+
+管理员当前拥有 AI 不限次数的权限，仍受并发、超时、阶段解锁和账号数据隔离约束。学习进度各自保存，不复制初始账号的进度。新增管理员仅通过服务器命令操作，普通注册不能指定角色。
+
+先升级并确认应用健康，使 `0004_user_roles.sql` 迁移生效；初始账号自动标记为管理员，已有普通账号保持普通权限。然后在服务器的项目目录，通过隐藏输入将至少 12 位密码传入容器命令。密码不要写在命令行、脚本或仓库中。
+
+```bash
+read -rsp '新管理员密码（至少 12 位）: ' WORDSTEPS_NEW_ADMIN_PASSWORD
+printf '\n'
+printf '%s\n' "$WORDSTEPS_NEW_ADMIN_PASSWORD" | docker compose exec -T app node scripts/create-admin.mjs --username another-admin
+unset WORDSTEPS_NEW_ADMIN_PASSWORD
+```
+
+用户名允许 2–32 位英文字母、数字、下划线或连字符。命令只在已升级的现有数据库中创建新管理员；同名账号（不区分大小写）或初始账号保留名会被拒绝，不会覆盖密码或提升已有账号。成功输出只包含用户名、角色及创建状态，数据库只存 scrypt 哈希。
+
 ## 数据、备份与升级
 
 数据库位于容器 `/data/wordsteps.sqlite`，Compose 命名卷为 `wordsteps_learning_data`。普通 `docker compose down` 不删除数据；不要使用 `down -v`。每次启动自动按顺序执行新增迁移；已应用迁移有校验和，不要修改旧迁移文件。

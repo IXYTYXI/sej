@@ -27,7 +27,7 @@ function setup(fetchImpl = async () => Response.json({choices:[{message:{content
   const statement = (query,values=[]) => ({query,values,bind(...args){return statement(query,args)},async all(){return {results:sql.prepare(query).all(...values)}},async first(){return sql.prepare(query).get(...values)??null},async run(){const result=sql.prepare(query).run(...values);return {meta:{changes:Number(result.changes)}}}});
   const db = {prepare:statement,async batch(statements){sql.exec('BEGIN');try{const result=statements.map(s=>({meta:{changes:Number(sql.prepare(s.query).run(...s.values).changes)}}));sql.exec('COMMIT');return result}catch(error){sql.exec('ROLLBACK');throw error}}};
   let now = time;
-  const service = (userId='u1',configs=providers) => createAiService(db,catalog,{userId,displayName:'PRIVATE NAME'},configs,{clock:()=>now,fetch:fetchImpl});
+  const service = (userId='u1',configs=providers,role) => createAiService(db,catalog,{userId,displayName:'PRIVATE NAME',role},configs,{clock:()=>now,fetch:fetchImpl});
   return {service,sql,db,setTime:value=>{now=value}};
 }
 const input = (action='hint',other={}) => ({action,language:'en',provider:'openai',...(action==='hint'?{wordId:'apple'}:{}),...(action==='chat'?{messages:[{role:'user',content:'Hello'}]}:{}),requestId:crypto.randomUUID(),...other});
@@ -62,6 +62,7 @@ test('hint enforces language and unlocked stages before spending quota',async()=
   let calls=0;
   const {service,sql}=setup(async()=>{calls++;return Response.json({choices:[{message:{content:'hint'}}]})});
   await assert.rejects(service().run(input('hint',{wordId:'secret'})),{status:403});
+  await assert.rejects(service('study-admin',providers,'admin').run(input('hint',{wordId:'secret'})),{status:403});
   await assert.rejects(service().run(input('hint',{wordId:'neko'})),{status:400});
   assert.equal(calls,0);
   assert.equal(sql.prepare('SELECT COUNT(*) n FROM ai_requests').get().n,0);
@@ -79,7 +80,7 @@ test('hint cache and request receipts are isolated by user, provider and model',
   assert.equal((await service().run(input())).text,first.text);
   assert.equal((await service().status()).usedToday,1);
   await assert.rejects(service().run({...request,wordId:'secret'}),{status:409});
-  assert.notEqual((await service('u2').run(request)).text,first.text);
+  assert.notEqual((await service('u2',providers,'admin').run(request)).text,first.text);
   assert.notEqual((await service().run(input('hint',{provider:'anthropic'}))).text,first.text);
   const newModel=providers.map(p=>p.id==='openai'?{...p,model:'replacement-model'}:p);
   assert.notEqual((await service('u1',newModel).run(input())).text,first.text);
@@ -95,7 +96,7 @@ test('report uses only this language and learner, a 14-day history, and no ident
   sql.prepare('INSERT INTO review_events VALUES (?,?,?,?,?,?,?)').run('u1','event-1','apple','en',time,1,JSON.stringify({rating:1}));
   sql.prepare('INSERT INTO review_events VALUES (?,?,?,?,?,?,?)').run('u1','old-event','apple','en',time-15*86400000,1,JSON.stringify({rating:1}));
   sql.prepare('INSERT INTO review_events VALUES (?,?,?,?,?,?,?)').run('u2','other-event','secret','en',time,1,JSON.stringify({rating:1}));
-  const report=await service().run(input('report'));
+  const report=await service('u1',providers,'admin').run(input('report'));
   const data=JSON.parse(prompt.messages[1].content);
   assert.equal(data.history.length,14);
   assert.equal(data.history.reduce((n,day)=>n+day.reviews,0),1);
@@ -126,15 +127,15 @@ test('chat rejects system roles and oversized input, sends at most ten messages,
   assert.equal(sql.prepare('SELECT COUNT(*) n FROM unlocks').get().n,0);
 });
 
-test('SQLite admission prevents concurrent generation per user but permits independent users',async()=>{
+test('SQLite admission limits administrators to one concurrent generation while permitting independent users',async()=>{
   let release,started;
   const gate=new Promise(resolve=>{release=resolve});
   const entered=new Promise(resolve=>{started=resolve});
   let calls=0;
   const {service}=setup(async()=>{calls++;if(calls===1){started();await gate}return Response.json({choices:[{message:{content:'ok'}}]})});
-  const pending=service().run(input('chat'));
+  const pending=service('u1',providers,'admin').run(input('chat'));
   await entered;
-  await assert.rejects(service().run(input('chat')),{status:429});
+  await assert.rejects(service('u1',providers,'admin').run(input('chat')),{status:429});
   assert.equal((await service('u2').run(input('chat'))).text,'ok');
   release();await pending;
   assert.equal(calls,2);
@@ -177,6 +178,19 @@ test('owner has unlimited AI calls while registered users keep the daily limit',
   await assert.rejects(service('registered-user').run(input('chat')),{status:429});
   assert.equal((await service('registered-user').status()).dailyLimit,30);
   assert.equal(calls,61);
+});
+
+test('trusted administrator role grants unlimited AI while an explicit user role remains limited',async()=>{
+  let calls=0;
+  const {service}=setup(async()=>{calls++;return Response.json({choices:[{message:{content:'ok'}}]})});
+  const admin=service('study-admin',providers,'admin');
+  assert.equal((await admin.status()).dailyLimit,null);
+  for(let i=0;i<31;i++) await admin.run(input('chat',{messages:[{role:'user',content:`admin turn ${i}`}]}));
+  assert.equal((await admin.status()).usedToday,31);
+  assert.equal((await service('owner',providers,'user').status()).dailyLimit,30);
+  assert.equal((await service('ordinary',providers,'user').status()).dailyLimit,30);
+  await assert.rejects(admin.run(input('chat',{role:'admin'})),{status:400});
+  assert.equal(calls,31);
 });
 
 test('upstream failure is redacted, releases concurrency and is not returned as successful content',async()=>{

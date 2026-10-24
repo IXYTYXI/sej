@@ -35,6 +35,17 @@ async function start(){
  throw new Error(`Test server did not start: ${serverLog}`);
 }
 async function stop(){if(server&&server.exitCode===null){server.kill('SIGTERM');await new Promise(resolve=>server.once('exit',resolve));}}
+async function createAdmin(username,password){
+ const output=await new Promise((resolve,reject)=>{
+  const child=spawn(process.execPath,['--experimental-strip-types','scripts/create-admin.mjs','--username',username],{cwd:process.cwd(),env:cleanEnvironment,stdio:['pipe','pipe','pipe']});
+  let stdout='';let stderr='';
+  child.stdout.on('data',data=>stdout+=data);child.stderr.on('data',data=>stderr+=data);
+  child.on('error',reject);child.stdin.on('error',reject);
+  child.on('close',code=>code===0?resolve(stdout):reject(new Error(`Administrator fixture creation failed (${code}): ${stderr}`)));
+  child.stdin.end(password+'\n');
+ });
+ assert.deepEqual(JSON.parse(output),{created:true,username,role:'admin'});
+}
 
 const catalog=JSON.parse(fs.readFileSync('data/catalog.json','utf8'));
 const stage=catalog.stages.find(s=>s.language==='en'&&!s.prerequisiteId);
@@ -57,7 +68,7 @@ try{
  const forged=await fetch(origin+basePath+'/api/state?language=en',{headers:{'oai-authenticated-user-id':'owner','oai-authenticated-user-email':'fake@example.invalid'}});assert.equal(forged.status,401);
  assert.equal((await api('/api/auth/register',{username:'friend',password,inviteCode:'not-configured'})).status,503);
  assert.equal((await api('/api/auth/login',{username,password:'wrong'})).status,401);
- const login=await api('/api/auth/login',{username,password});ok(login);
+ const login=await api('/api/auth/login',{username,password});assert.equal(ok(login).user.role,'admin');
  const setCookie=login.headers.get('set-cookie');assert.ok(setCookie.includes('HttpOnly'));assert.ok(setCookie.includes('Secure'));assert.ok(setCookie.includes('Path=/study'));cookie=setCookie.split(';')[0];
  const page=await fetch(origin+basePath,{headers:{Cookie:cookie}});assert.equal(page.status,200);
  const loginRedirect=await fetch(origin+basePath+'/login',{headers:{Cookie:cookie},redirect:'manual'});assert.equal(loginRedirect.status,307);assert.equal(loginRedirect.headers.get('location'),basePath+'/');
@@ -252,9 +263,11 @@ try{
  await start();
  const ownerLogin=await api('/api/auth/login',{username,password});ok(ownerLogin);
  const ownerCookie=ownerLogin.headers.get('set-cookie').split(';')[0];
+ assert.equal((await api('/api/auth/register',{username:'friend',password,inviteCode,role:'admin'})).status,400);
  const registration=await api('/api/auth/register',{username:'friend',password,inviteCode});
- const registered=ok(registration);assert.notEqual(registered.user.userId,'owner');
+ const registered=ok(registration);assert.notEqual(registered.user.userId,'owner');assert.equal(registered.user.role,'user');
  cookie=registration.headers.get('set-cookie').split(';')[0];
+ assert.equal(ok(await api('/api/ai/status')).dailyLimit,30);
  const friendInitial=ok(await api('/api/state?language=en'));
  assert.equal(friendInitial.stats.todayNew,0);assert.equal(friendInitial.stats.learning,0);
  assert.equal(friendInitial.quota.limit,10);assert.equal(friendInitial.quota.boostsUsed,0);
@@ -264,6 +277,32 @@ try{
  cookie=ownerCookie;
  assert.deepEqual(ok(await api('/api/state?language=en')).quota,persistentQuota);
  assert.equal(ok(await api('/api/state?language=en')).stats.todayNew,11);
+
+ // Provision a separate administrator through the deployed CLI after migrations.
+ const adminUsername='study-admin';const adminPassword=crypto.randomUUID()+crypto.randomUUID();
+ await createAdmin(adminUsername,adminPassword);
+ try{
+  const adminLogin=await api('/api/auth/login',{username:adminUsername,password:adminPassword});
+  const admin=ok(adminLogin).user;
+  assert.equal(admin.role,'admin');assert.equal(admin.displayName,adminUsername);
+  assert.notEqual(admin.userId,'owner');assert.notEqual(admin.userId,registered.user.userId);
+  cookie=adminLogin.headers.get('set-cookie').split(';')[0];
+  const adminAi=ok(await api('/api/ai/status'));assert.equal(adminAi.dailyLimit,null);assert.equal(adminAi.usedToday,0);
+  const adminState=ok(await api('/api/state?language=en'));
+  assert.equal(adminState.stats.todayNew,0);assert.equal(adminState.stats.learning,0);assert.equal(adminState.stats.mastered,0);
+  assert.equal(adminState.quota.limit,10);assert.equal(adminState.quota.boostsUsed,0);
+  assert.equal(adminState.stages.find(s=>s.id===stage.id).learned,0);
+  assert.equal(adminState.stages.find(s=>s.id===next.id).unlocked,false);
+  assert.deepEqual(ok(await api('/api/study?language=en&mode=practice')).cards,[]);
+  assert.equal((await api('/api/study?language=en&stageId='+next.id)).status,403);
+  assert.equal((await api('/api/study?language=en&mode=practice&stageId='+next.id)).status,403);
+  assert.equal((await api('/api/review',{wordId:lockedWord,rating:4,version:0,requestId:crypto.randomUUID()})).status,403);
+  assert.equal((await api('/api/exam',{stageId:stage.id})).status,403);
+ }finally{cookie=ownerCookie;}
+ const ownerAfterAdmin=ok(await api('/api/state?language=en'));
+ assert.equal(ownerAfterAdmin.stats.todayNew,11);assert.equal(ownerAfterAdmin.stages.find(s=>s.id===next.id).unlocked,true);
+ assert.deepEqual(ownerAfterAdmin.quota,persistentQuota);
+ console.log('PASS CLI-created administrator login and unlimited AI, ordinary-user allowance, role injection rejection, isolated learning and unchanged stage gates');
 
  // A successful login by another account cannot clear the owner's failure count.
  for(let i=0;i<10;i++){

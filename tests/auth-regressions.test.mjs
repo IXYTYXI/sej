@@ -76,7 +76,7 @@ test('concurrent attempts share the same account limit', async t => {
 test('legacy owner names remain usable without relaxing new registration names', async t => {
   for (const username of ['x', 'owner@example.invalid', '账号', 'a'.repeat(33), 'a'.repeat(128)]) {
     const { auth } = fixture(t, username);
-    assert.deepEqual((await auth.login({ username, password })).user, { userId: 'owner', displayName: username });
+    assert.deepEqual((await auth.login({ username, password })).user, { userId: 'owner', displayName: username, role: 'admin' });
     await assert.rejects(auth.register({ username, password: friendPassword, inviteCode }), { status: 400 });
   }
   const { auth } = fixture(t);

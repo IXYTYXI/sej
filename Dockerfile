@@ -17,6 +17,8 @@ COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static
 COPY --from=build --chown=node:node /app/public ./public
 COPY --from=build --chown=node:node /app/drizzle ./drizzle
+COPY --from=build --chown=node:node /app/scripts/create-admin.mjs ./scripts/create-admin.mjs
+COPY --from=build --chown=node:node /app/lib/auth-password.ts ./lib/auth-password.ts
 USER node
 EXPOSE 3000
 CMD ["node", "server.js"]

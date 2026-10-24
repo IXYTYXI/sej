@@ -3,7 +3,8 @@ import type { Database } from './database';
 import { ApiError, object } from './server-http';
 import { hashPassword, verifyPassword } from './auth-password';
 
-export type AuthUser = { userId: string; displayName: string };
+export type UserRole = 'admin' | 'user';
+export type AuthUser = { userId: string; displayName: string; role: UserRole };
 export type AuthConfig = { username: string; passwordHash: string; registrationCode: string };
 export const SESSION_COOKIE = 'wordsteps_session';
 const SESSION_DURATION = 7 * 86400000;
@@ -29,8 +30,8 @@ function sameSecret(input: string, expected: string): boolean {
 }
 
 export function createAuthService(db: Database, config: AuthConfig, clock = Date.now) {
-  const ensureOwner = () => db.prepare(`INSERT INTO users(id,username,password_hash,created_at) VALUES ('owner',?,?,?)
-    ON CONFLICT(id) DO UPDATE SET username=excluded.username, password_hash=excluded.password_hash`)
+  const ensureOwner = () => db.prepare(`INSERT INTO users(id,username,password_hash,created_at,role) VALUES ('owner',?,?,?,'admin')
+    ON CONFLICT(id) DO UPDATE SET username=excluded.username, password_hash=excluded.password_hash, role='admin'`)
     .bind(config.username, config.passwordHash, clock()).run();
 
   async function limit(key: string, now: number) {
@@ -42,7 +43,7 @@ export function createAuthService(db: Database, config: AuthConfig, clock = Date
   }
 
   async function account(username: string) {
-    return db.prepare('SELECT id,username,password_hash FROM users WHERE username=? COLLATE NOCASE').bind(username).first<{ id: string; username: string; password_hash: string }>();
+    return db.prepare('SELECT id,username,password_hash,role FROM users WHERE username=? COLLATE NOCASE').bind(username).first<{ id: string; username: string; password_hash: string; role: UserRole }>();
   }
 
   async function openSession(userId: string, passwordHash: string, now: number, loginLimitKey?: string) {
@@ -69,7 +70,7 @@ export function createAuthService(db: Database, config: AuthConfig, clock = Date
       await limit(loginLimitKey, now);
       if (!row || !await verifyPassword(password, row.password_hash)) throw new ApiError(401, '账号或密码不正确');
       const session = await openSession(row.id, row.password_hash, now, loginLimitKey);
-      return { ...session, user: { userId: row.id, displayName: row.username } };
+      return { ...session, user: { userId: row.id, displayName: row.username, role: row.role } };
     },
     async register(input: unknown) {
       const { username, password, inviteCode } = object(input, ['username', 'password', 'inviteCode']);
@@ -85,22 +86,22 @@ export function createAuthService(db: Database, config: AuthConfig, clock = Date
       catch { throw new ApiError(400, '密码需要 12 到 1024 个字符'); }
       const userId = randomBytes(16).toString('base64url');
       try {
-        await db.prepare('INSERT INTO users(id,username,password_hash,created_at) VALUES (?,?,?,?)').bind(userId, username, passwordHash, now).run();
+        await db.prepare("INSERT INTO users(id,username,password_hash,created_at,role) VALUES (?,?,?,?,'user')").bind(userId, username, passwordHash, now).run();
       } catch (error) {
         if (error instanceof Error && error.message.includes('UNIQUE')) throw new ApiError(409, '这个账号已经注册');
         throw error;
       }
       const session = await openSession(userId, passwordHash, now);
-      return { ...session, user: { userId, displayName: username } };
+      return { ...session, user: { userId, displayName: username, role: 'user' as const } };
     },
     async userForHeaders(headers: Headers): Promise<AuthUser | null> {
       const token = tokenFromHeaders(headers);
       if (!token) return null;
       await ensureOwner();
-      const row = await db.prepare(`SELECT u.id AS user_id, u.username, u.password_hash, s.auth_version FROM auth_sessions s
-        JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?`).bind(digest(token), clock()).first<{ user_id: string; username: string; password_hash: string; auth_version: string }>();
+      const row = await db.prepare(`SELECT u.id AS user_id, u.username, u.password_hash, u.role, s.auth_version FROM auth_sessions s
+        JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?`).bind(digest(token), clock()).first<{ user_id: string; username: string; password_hash: string; role: UserRole; auth_version: string }>();
       if (!row || row.auth_version !== digest(row.password_hash)) return null;
-      return { userId: row.user_id, displayName: row.username };
+      return { userId: row.user_id, displayName: row.username, role: row.role };
     },
     async logout(headers: Headers): Promise<void> {
       const token = tokenFromHeaders(headers);
