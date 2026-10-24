@@ -1,15 +1,14 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./internal-ui.css";
+import { appPath } from "../lib/paths";
 
 export const metadata: Metadata = {
   title: "词阶 Wordsteps · 每天向上一步",
   description: "英语与日语分级词库，用间隔重复把新词变成长期记忆。",
-  other: {
-    "codex-preview": "development",
-  },
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: appPath("/favicon.svg"),
+    shortcut: appPath("/favicon.svg"),
   },
 };
 

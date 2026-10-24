@@ -1,13 +1,23 @@
+import { appPath } from "../../lib/paths";
+
 export type Language = "en" | "ja";
-export type Tab = "today" | "library" | "progress" | "settings";
+export type Tab = "today" | "library" | "progress" | "ai" | "settings";
 export type Course = { id: string; title: string; language: Language; description: string; sourceUrl: string };
 export type Stage = {
   id: string; courseId: string; language: Language; title: string; index: number;
   prerequisiteId: string | null; total: number; mastered: number; learned: number;
   percent: number; unlocked: boolean; passed: boolean; canTest: boolean;
 };
+export type DailyQuota = {
+  day: string; baseLimit: number; limit: number; boostsUsed: number; boostsRemaining: number;
+  needsDecision: boolean; previousDay: string | null; previousLimit: number | null;
+  version: number; boosts: number[];
+};
+export type QuotaRequest = { language: Language; action: "boost" | "keep" | "reset";
+  amount?: number; day: string; version: number; requestId: string };
 export type AppState = {
   user: { name: string }; language: Language; settings: { dailyNewLimit: number };
+  quota: DailyQuota;
   stats: { mastered: number; learning: number; due: number; totalWords: number; todayReviews: number;
     todayNew: number; unlockedStages: number; totalStages: number };
   courses: Course[]; stages: Stage[];
@@ -19,16 +29,28 @@ export type StudyCard = {
   example?: string; exampleMeaning?: string; tags: string[]; source: string;
   version: number; isNew: boolean;
 };
-export type StudyResponse = { cards: StudyCard[]; newRemaining: number; dueCount: number };
+export type StudyMode = "scheduled" | "practice";
+export type StudyResponse = {
+  cards: StudyCard[]; newRemaining: number; dueCount: number; quota: DailyQuota; mode: StudyMode;
+  availability: { unseenCount: number; learnedCount: number; nextReviewAt: string | null;
+    challengeStage: { id: string; title: string } | null };
+};
 export type Exam = { id: string; questions: { id: string; prompt: string; choices: { id: string; text: string }[] }[]; expiresAt: string };
 export type ExamResult = { score: number; total: number; passed: boolean; unlockedStageIds: string[];
   results: { prompt: string; correct: boolean; answer: string; chosen: string }[] };
+export type AIProviderId = "anthropic" | "openai";
+export type AIProvider = { id: AIProviderId; label: string; model: string; enabled: boolean };
+export type AIStatus = { providers: AIProvider[]; defaultProvider: AIProviderId | null; dailyLimit: number | null; usedToday: number };
+export type AIMessage = { role: "user" | "assistant"; content: string };
+export type AIRequest = { action: "report" | "hint" | "chat"; language: Language; provider: AIProviderId;
+  wordId?: string; messages?: AIMessage[]; requestId: string };
+export type AIResponse = { text: string; provider: AIProviderId; model: string; cached: boolean };
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
 export async function api<T>(url: string, body?: unknown): Promise<T> {
-  const response = await fetch(url, {
+  const response = await fetch(appPath(url), {
     method: body === undefined ? "GET" : "POST",
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),

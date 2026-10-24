@@ -1,0 +1,8 @@
+# Merge these handles inside the EXISTING xairlab.com site block.
+# Keep the existing main site's other handles/reverse_proxy configuration.
+# Do not use handle_path: Next is built with /study and expects that prefix.
+@wordsteps path /study /study/*
+handle @wordsteps {
+	reverse_proxy wordsteps:3000
+}
+# Existing main-site routes follow in their original catch-all handle.
